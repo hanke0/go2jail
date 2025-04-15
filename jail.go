@@ -12,6 +12,7 @@ import (
 func init() {
 	RegisterJail("nftset", NewNftJail)
 	RegisterJail("echo", NewEchoJail)
+	RegisterJail("shell", NewShellJail)
 }
 
 type NftJail struct {
@@ -89,11 +90,55 @@ func NewEchoJail(b []byte) (Jailer, error) {
 	return &EchoJail{}, nil
 }
 
-func (nj *EchoJail) Arrest(ip net.IP, log Logger) error {
+func (ej *EchoJail) Arrest(ip net.IP, log Logger) error {
 	log.Errorf("[jail-echo] arrest ip %s", ip)
 	return nil
 }
 
-func (nj *EchoJail) Close() error {
+func (ej *EchoJail) Close() error {
+	return nil
+}
+
+type ShellJail struct {
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args"`
+}
+
+func NewShellJail(b []byte) (Jailer, error) {
+	var j ShellJail
+	if err := yaml.Unmarshal(b, &j); err != nil {
+		return nil, err
+	}
+	cmd, err := exec.LookPath(j.Command)
+	if err != nil {
+		return nil, err
+	}
+	j.Command = cmd
+	return &j, nil
+}
+
+func (sj *ShellJail) Arrest(ip net.IP, log Logger) error {
+	program := append([]string{sj.Command}, sj.Args...)
+	if sj.Args == nil {
+		program = append(program, ip.String())
+	}
+	for i, arg := range program {
+		switch arg {
+		case "%(ip)":
+			program[i] = ip.String()
+		default:
+		}
+	}
+	c, err := Execute(ExecuteOptions{
+		Program:    program,
+		OutputSize: 1024,
+	})
+	if err != nil {
+		log.Errorf("[jail-shell] arrest ip %s fail: %v, %s", ip, err, c)
+	}
+	return err
+}
+
+func (sj *ShellJail) Close() error {
 	return nil
 }
