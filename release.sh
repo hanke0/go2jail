@@ -6,7 +6,7 @@ go vet ./...
 
 release_platform() {
     while [ $# -gt 0 ]; do
-        name="./dist/koreader-sync-$1-$2"
+        name="./dist/go2jail-$1-$2"
         if [ "$1" = "windows" ]; then
             name="$name.exe"
         fi
