@@ -103,13 +103,13 @@ func (i ipCidr) Equal(o ipCidr) bool {
 }
 
 type Config struct {
-	Jail       []*Jail       `yaml:"jails"`
-	Allows     []ipCidr      `yaml:"allows"`
+	Jail       []*Jail       `yaml:"jail"`
+	Allow      []ipCidr      `yaml:"allow"`
 	Discipline []*Discipline `yaml:"discipline"`
 }
 
 func (c *Config) AllowIP(ip net.IP) bool {
-	for _, v := range c.Allows {
+	for _, v := range c.Allow {
 		if v.Contains(ip) {
 			return true
 		}
