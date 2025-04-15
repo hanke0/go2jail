@@ -1,0 +1,126 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"regexp"
+	"strings"
+	"sync"
+
+	"github.com/goccy/go-yaml"
+	"github.com/hpcloud/tail"
+)
+
+func init() {
+	RegisterDiscipline("log", NewFileDiscipline)
+}
+
+type FileDiscipline struct {
+	Files   []string `yaml:"files"`
+	Regexes []string `yaml:"regexes"`
+	regexes []*regexp.Regexp
+	ctx     context.Context
+	cancel  func()
+	wg      sync.WaitGroup
+	ipGroup int
+}
+
+var (
+	regexReplacer = map[string]string{
+		"%(ip)": `(?P<ip>(((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])))|(((([0-9a-f]{1,4}:){7}([0-9a-f]{1,4}|:))|(([0-9a-f]{1,4}:){6}(:[0-9a-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9a-f]{1,4}:){5}(((:[0-9a-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9a-f]{1,4}:){4}(((:[0-9a-f]{1,4}){1,3})|((:[0-9a-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-f]{1,4}:){3}(((:[0-9a-f]{1,4}){1,4})|((:[0-9a-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-f]{1,4}:){2}(((:[0-9a-f]{1,4}){1,5})|((:[0-9a-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-f]{1,4}:){1}(((:[0-9a-f]{1,4}){1,6})|((:[0-9a-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9a-f]{1,4}){1,7})|((:[0-9a-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))(%.+)?))`,
+	}
+)
+
+func replaceRegex(r string) string {
+	for k, v := range regexReplacer {
+		r = strings.ReplaceAll(r, k, v)
+	}
+	return r
+}
+
+func NewFileDiscipline(b []byte) (Discipliner, error) {
+	var f FileDiscipline
+	if err := yaml.Unmarshal(b, &f); err != nil {
+		return nil, err
+	}
+	for _, r := range f.Regexes {
+		r = replaceRegex(r)
+		p, err := regexp.Compile(r)
+		if err != nil {
+			return nil, fmt.Errorf("bad regex: %w", err)
+		}
+		f.regexes = append(f.regexes, p)
+	}
+	if len(f.regexes) == 0 {
+		return nil, errors.New("regexes not setting")
+	}
+	last := f.regexes[len(f.regexes)-1]
+	for i, name := range last.SubexpNames() {
+		switch name {
+		case "ip":
+			if f.ipGroup > 0 {
+				return nil, fmt.Errorf("too many regex group: %s", last.String())
+			}
+			f.ipGroup = i
+		}
+	}
+	if f.ipGroup <= 0 {
+		return nil, fmt.Errorf("last regex do not contains ip group: %s", last.String())
+	}
+	f.ctx, f.cancel = context.WithCancel(context.Background())
+	return &f, nil
+}
+
+func (fd *FileDiscipline) Watch(banip chan<- net.IP, logger Logger) error {
+	for _, f := range fd.Files {
+		t, err := tail.TailFile(f, tail.Config{
+			Follow:    true,
+			ReOpen:    true,
+			MustExist: true,
+		})
+		if err != nil {
+			return err
+		}
+		fd.wg.Add(1)
+		go func() {
+			defer fd.wg.Done()
+			for {
+				select {
+				case <-fd.ctx.Done():
+					t.Stop()
+					t.Cleanup()
+					return
+				case f := <-t.Lines:
+					if len(f.Text) > 0 {
+						fd.doLine(f.Text, banip, logger)
+					}
+				}
+			}
+		}()
+	}
+	return nil
+}
+
+func (fd *FileDiscipline) Close() error {
+	fd.cancel()
+	fd.wg.Wait()
+	return nil
+}
+
+func (fd *FileDiscipline) doLine(line string, ch chan<- net.IP, logger Logger) {
+	var groups []string
+	for _, re := range fd.regexes {
+		groups = re.FindStringSubmatch(line)
+		if len(groups) > 0 {
+			line = groups[0]
+		} else {
+			return
+		}
+	}
+	if len(groups) > fd.ipGroup {
+		ip := groups[fd.ipGroup]
+		ch <- net.ParseIP(ip)
+	}
+}
