@@ -30,7 +30,7 @@ func NewNftJail(b []byte) (Jailer, error) {
 	if nft == "" {
 		nft = "nft"
 	}
-	p, err := exec.LookPath("nft")
+	p, err := exec.LookPath(nft)
 	if err != nil {
 		return nil, fmt.Errorf("can not find nft executable: %w", err)
 	}

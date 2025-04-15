@@ -18,7 +18,7 @@ type Jail struct {
 }
 
 func (j *Jail) UnmarshalYAML(b []byte) error {
-	if err := yaml.Unmarshal(b, j.BaseJail); err != nil {
+	if err := yaml.Unmarshal(b, &j.BaseJail); err != nil {
 		return err
 	}
 	builder := jailProviders[j.Type]

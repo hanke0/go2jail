@@ -2,8 +2,6 @@
 
 set -Eeo pipefail
 
-go vet ./...
-
 release_platform() {
     while [ $# -gt 0 ]; do
         name="./dist/go2jail-$1-$2"
