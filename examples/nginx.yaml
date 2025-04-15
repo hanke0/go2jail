@@ -1,0 +1,23 @@
+jail:
+  - id: nft
+    type: nftset
+    sudo: false
+    nft_executable: nft
+    rule: inet
+    table: filter
+    ipv4_set: ipv4_block_set
+    ipv6_set: ipv6_block_set
+
+#allow:
+#  - 1.1.1.1/32
+
+discipline:
+  - id: nginx
+    jail: ['nft']
+    source: log
+    counter: 3/60m
+    files:
+      - /var/log/nginx/access.log
+    regexes:
+      # $remote_addr - "$remote_user" [$time_iso8601] "$host" "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time
+      - %(ip)\s+\-\s+"[^"]+"\s+\[[^\]]+\]\s+"[^"]+"\s+"[^"]+"\s+(?<status>401|402|403)\s+

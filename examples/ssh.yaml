@@ -1,0 +1,22 @@
+jail:
+  - id: nft
+    type: nftset
+    sudo: false
+    nft_executable: nft
+    rule: inet
+    table: filter
+    ipv4_set: ipv4_block_set
+    ipv6_set: ipv6_block_set
+
+#allow:
+#  - 1.1.1.1/32
+
+discipline:
+  - id: sshd
+    jail: ['nft']
+    source: log
+    counter: 5/10m
+    files:
+      - /var/log/auth.log
+    regexes:
+      - authentication\s+failure.+?rhost=%(ip)

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/goccy/go-yaml"
@@ -27,12 +28,14 @@ type FileDiscipline struct {
 	ctx     context.Context
 	cancel  func()
 	wg      sync.WaitGroup
+	wgCount atomic.Int32
+
 	ipGroup int
 }
 
 var (
 	regexReplacer = map[string]string{
-		"%(ip)": `(?P<ip>(((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])))|(((([0-9a-f]{1,4}:){7}([0-9a-f]{1,4}|:))|(([0-9a-f]{1,4}:){6}(:[0-9a-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9a-f]{1,4}:){5}(((:[0-9a-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9a-f]{1,4}:){4}(((:[0-9a-f]{1,4}){1,3})|((:[0-9a-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-f]{1,4}:){3}(((:[0-9a-f]{1,4}){1,4})|((:[0-9a-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-f]{1,4}:){2}(((:[0-9a-f]{1,4}){1,5})|((:[0-9a-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9a-f]{1,4}:){1}(((:[0-9a-f]{1,4}){1,6})|((:[0-9a-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9a-f]{1,4}){1,7})|((:[0-9a-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))(%.+)?))`,
+		"%(ip)": `(?P<ip>(([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4})|([0-9]{1,3}(\.[0-9]{1,3}){3}))`,
 	}
 )
 
@@ -76,18 +79,24 @@ func NewFileDiscipline(b []byte) (Discipliner, error) {
 	return &f, nil
 }
 
-func (fd *FileDiscipline) tail(f string) (t *tail.Tail, err error) {
+func (fd *FileDiscipline) tail(f string, testing bool) (t *tail.Tail, err error) {
+	cfg := tail.Config{
+		Location: &tail.SeekInfo{
+			Offset: 0,
+			Whence: io.SeekEnd,
+		},
+		Follow:    true,
+		ReOpen:    true,
+		MustExist: true,
+		Logger:    tail.DiscardingLogger,
+	}
+	if testing {
+		cfg.Location = nil
+		cfg.Follow = false
+		cfg.ReOpen = false
+	}
 	for range 3 {
-		t, err = tail.TailFile(f, tail.Config{
-			Location: &tail.SeekInfo{
-				Offset: 0,
-				Whence: io.SeekEnd,
-			},
-			Follow:    true,
-			ReOpen:    true,
-			MustExist: true,
-			Logger:    tail.DiscardingLogger,
-		})
+		t, err = tail.TailFile(f, cfg)
 		if err == nil {
 			break
 		}
@@ -105,38 +114,54 @@ func (fd *FileDiscipline) addCancel(f func()) {
 }
 
 func (fd *FileDiscipline) Watch(logger Logger) (<-chan net.IP, error) {
+	return fd.watch(logger, false)
+}
+
+func (fd *FileDiscipline) Test(logger Logger) (<-chan net.IP, error) {
+	return fd.watch(logger, true)
+}
+
+func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, error) {
 	var ch = make(chan net.IP, 1024)
 	fd.addCancel(func() {
 		close(ch)
 	})
 	for _, f := range fd.Files {
-		t, err := fd.tail(f)
+		t, err := fd.tail(f, testing)
 		if err != nil {
 			close(ch)
 			return nil, err
 		}
 		fd.wg.Add(1)
+		fd.wgCount.Add(1)
 		go func(t *tail.Tail, f string) {
-			defer fd.wg.Done()
+			defer func() {
+				fd.wg.Done()
+				if fd.wgCount.Add(-1) <= 0 {
+					fd.cancel()
+				}
+			}()
 			logger.Debugf("[discipline] watch file: %s", f)
 			for {
 				select {
 				case <-fd.ctx.Done():
+					logger.Infof("[discipline] file closed: %s", f)
 					t.Stop()
 					t.Cleanup()
 					return
-				case line := <-t.Lines:
+				case line, ok := <-t.Lines:
+					if !ok {
+						logger.Infof("[discipline] file closed: %s", f)
+						t.Stop()
+						t.Cleanup()
+						return
+					}
 					if line.Err != nil {
-						logger.Errorf("[discipline] tail file fail, retry %s: %v", f, line.Err)
-						nt, err := fd.tail(f)
-						if err != nil {
-							logger.Errorf("[discipline] tail file fail: %v", err)
-							fd.cancel()
-							close(ch)
-							return
-						}
-						t = nt
-						continue
+						logger.Errorf("[discipline] tail file fail %s: %v", f, line.Err)
+						t.Stop()
+						t.Cleanup()
+						fd.cancel()
+						return
 					}
 					logger.Debugf("[discipline] get line from %s: length=%d", f, len(line.Text))
 					if len(line.Text) > 0 {
@@ -168,12 +193,16 @@ func (fd *FileDiscipline) doLine(f, line string, ch chan<- net.IP, logger Logger
 		}
 	}
 	if len(groups) > fd.ipGroup {
-		ip := groups[fd.ipGroup]
-		if fd.Counter.Add(ip) {
-			logger.Infof("[discipline] arrest: %s", ip)
-			ch <- net.ParseIP(ip)
+		ip := net.ParseIP(groups[fd.ipGroup])
+		if ip == nil {
+			return
+		}
+		sip := ip.String()
+		if fd.Counter.Add(sip) {
+			logger.Infof("[discipline] arrest: %s", sip)
+			ch <- ip
 		} else {
-			logger.Infof("[discipline] watch-on: %s", ip)
+			logger.Infof("[discipline] watch-on: %s", sip)
 		}
 	}
 }

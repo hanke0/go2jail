@@ -14,11 +14,13 @@ var flags struct {
 	LogLevel  int
 	LogFile   string
 	ConfigDir string
+	Test      string
 }
 
 func init() {
 	flag.StringVar(&flags.LogFile, "log-file", "stderr", "log file definition. support special value: stdout(or -), stderr")
 	flag.StringVar(&flags.ConfigDir, "config-dir", "./", "config file directory. load yaml files by lexicographically order.")
+	flag.StringVar(&flags.Test, "test", "", "test discipline id")
 	flag.IntVar(&flags.LogLevel, "log-level", LevelWarning, "log level, set debug to error[0,4]")
 }
 
@@ -78,7 +80,7 @@ func main() {
 		cleanup()
 		log.Fatal(err)
 	}
-	stop, wait, err := Start(cfg, logger)
+	stop, wait, err := Start(cfg, logger, flags.Test)
 	if err != nil {
 		cleanup()
 		log.Fatal(err)

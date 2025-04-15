@@ -11,6 +11,7 @@ import (
 
 func init() {
 	RegisterJail("nftset", NewNftJail)
+	RegisterJail("echo", NewEchoJail)
 }
 
 type NftJail struct {
@@ -78,5 +79,21 @@ func (nj *NftJail) Arrest(ip net.IP, log Logger) error {
 }
 
 func (nj *NftJail) Close() error {
+	return nil
+}
+
+type EchoJail struct {
+}
+
+func NewEchoJail(b []byte) (Jailer, error) {
+	return &EchoJail{}, nil
+}
+
+func (nj *EchoJail) Arrest(ip net.IP, log Logger) error {
+	log.Errorf("[jail-echo] arrest ip %s", ip)
+	return nil
+}
+
+func (nj *EchoJail) Close() error {
 	return nil
 }

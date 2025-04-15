@@ -8,7 +8,7 @@ import (
 	"sync"
 )
 
-func Start(cfg *Config, logger Logger) (stop, wait func(), err error) {
+func Start(cfg *Config, logger Logger, test string) (stop, wait func(), err error) {
 	var waits []func()
 	waitAll := func() {
 		for _, w := range waits {
@@ -17,6 +17,10 @@ func Start(cfg *Config, logger Logger) (stop, wait func(), err error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	for _, v := range cfg.Discipline {
+		testing := test != ""
+		if testing && v.ID != test {
+			continue
+		}
 		var jails []*Jail
 		for _, j := range v.Jail {
 			idx := slices.IndexFunc(cfg.Jail, func(e *Jail) bool {
@@ -29,7 +33,7 @@ func Start(cfg *Config, logger Logger) (stop, wait func(), err error) {
 			}
 			jails = append(jails, cfg.Jail[idx])
 		}
-		s, err := runDiscipline(ctx, cfg, v, jails, logger)
+		s, err := runDiscipline(ctx, cfg, v, jails, logger, testing)
 		if err != nil {
 			cancel()
 			waitAll()
@@ -40,8 +44,18 @@ func Start(cfg *Config, logger Logger) (stop, wait func(), err error) {
 	return cancel, waitAll, nil
 }
 
-func runDiscipline(ctx context.Context, cfg *Config, d *Discipline, js []*Jail, log Logger) (func(), error) {
-	ch, err := d.Action.Watch(log)
+func runDiscipline(ctx context.Context,
+	cfg *Config, d *Discipline, js []*Jail,
+	log Logger, test bool) (func(), error) {
+	var (
+		ch  <-chan net.IP
+		err error
+	)
+	if test {
+		ch, err = d.Action.Test(log)
+	} else {
+		ch, err = d.Action.Watch(log)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +82,11 @@ func runDiscipline(ctx context.Context, cfg *Config, d *Discipline, js []*Jail, 
 					log.Debugf("[jail] ip is in allow list: %s", ip)
 					continue
 				}
-				jailIp(js, ip, log)
+				if test {
+					log.Errorf("[jail] test arrest ip: %s", ip)
+				} else {
+					jailIp(js, ip, log)
+				}
 			}
 		}
 	}()
@@ -85,5 +103,4 @@ func jailIp(js []*Jail, ip net.IP, log Logger) {
 			log.Infof("[jail][%s] arrest %s success", j.ID, ip)
 		}
 	}
-
 }

@@ -68,6 +68,7 @@ type Jailer interface {
 
 type Discipliner interface {
 	Watch(log Logger) (<-chan net.IP, error)
+	Test(log Logger) (<-chan net.IP, error)
 	Close() error
 }
 
