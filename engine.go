@@ -10,6 +10,11 @@ import (
 
 func Start(cfg *Config, logger Logger) (stop, wait func(), err error) {
 	var waits []func()
+	waitAll := func() {
+		for _, w := range waits {
+			w()
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	for _, v := range cfg.Discipline {
 		var jails []*Jail
@@ -18,22 +23,21 @@ func Start(cfg *Config, logger Logger) (stop, wait func(), err error) {
 				return e.ID == j
 			})
 			if idx < 0 {
+				cancel()
+				waitAll()
 				return nil, nil, fmt.Errorf("jail id not exist: %s", v.Jail)
 			}
 			jails = append(jails, cfg.Jail[idx])
 		}
 		s, err := runDiscipline(ctx, cfg, v, jails, logger)
 		if err != nil {
-			cleanup()
+			cancel()
+			waitAll()
 			return nil, nil, err
 		}
 		waits = append(waits, s)
 	}
-	return cancel, func() {
-		for _, w := range waits {
-			w()
-		}
-	}, nil
+	return cancel, waitAll, nil
 }
 
 func runDiscipline(ctx context.Context, cfg *Config, d *Discipline, js []*Jail, log Logger) (func(), error) {
