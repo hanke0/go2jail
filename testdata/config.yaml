@@ -1,5 +1,6 @@
 jail:
   - id: nft
+    sudo: true
     nft_executable: /tmp/nft
     type: nftset
     rule: inet
@@ -12,7 +13,7 @@ allow:
 
 discipline:
   - id: test
-    jail: nft
+    jail: ['nft']
     source: log
     counter: 10/5m
     files:

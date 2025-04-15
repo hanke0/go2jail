@@ -22,4 +22,6 @@ func TestParse(t *testing.T) {
 	require.Equal(t, "nft", cfg.Jail[0].ID)
 	require.Equal(t, "test", cfg.Discipline[0].ID)
 	require.True(t, cfg.AllowIP(net.IPv4(1, 1, 1, 1)))
+	require.False(t, cfg.AllowIP(net.IPv4(2, 2, 2, 2)))
+	require.False(t, cfg.AllowIP(net.IPv4(81, 6, 4, 1)))
 }

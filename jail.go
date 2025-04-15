@@ -14,6 +14,7 @@ func init() {
 }
 
 type NftJail struct {
+	Sudo          bool   `yaml:"sudo"`
 	NftExecutable string `yaml:"nft_executable"`
 	Rule          string `yaml:"rule"`
 	Table         string `yaml:"table"`
@@ -50,23 +51,28 @@ func (nj *NftJail) Arrest(ip net.IP, log Logger) error {
 		s = ip.To16().String()
 		set = nj.IPv6Set
 	}
+	var program []string
+	if nj.Sudo {
+		program = []string{"sudo"}
+	}
+	program = append(program,
+		nj.NftExecutable,
+		"add",
+		"element",
+		nj.Rule,
+		nj.Table,
+		set,
+		"{",
+		s,
+		"}",
+	)
 	f, err := Execute(ExecuteOptions{
-		Program: []string{
-			nj.NftExecutable,
-			"add",
-			"element",
-			nj.Rule,
-			nj.Table,
-			set,
-			"{",
-			s,
-			"}",
-		},
+		Program:    program,
 		OutputSize: 1024,
 		Timeout:    time.Second * 5,
 	})
 	if err != nil {
-		log.Errorf("[jail-nft] arrest ip %s: err=%v, output=%s,", ip, err, f)
+		log.Errorf("[jail-nft] arrest ip %s: err=%v, output=%s", s, err, f)
 	}
 	return err
 }

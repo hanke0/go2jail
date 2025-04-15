@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/hpcloud/tail"
@@ -74,34 +76,77 @@ func NewFileDiscipline(b []byte) (Discipliner, error) {
 	return &f, nil
 }
 
-func (fd *FileDiscipline) Watch(banip chan<- net.IP, logger Logger) error {
-	for _, f := range fd.Files {
-		t, err := tail.TailFile(f, tail.Config{
+func (fd *FileDiscipline) tail(f string) (t *tail.Tail, err error) {
+	for range 3 {
+		t, err = tail.TailFile(f, tail.Config{
+			Location: &tail.SeekInfo{
+				Offset: 0,
+				Whence: io.SeekEnd,
+			},
 			Follow:    true,
 			ReOpen:    true,
 			MustExist: true,
+			Logger:    tail.DiscardingLogger,
 		})
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	return
+}
+
+func (fd *FileDiscipline) addCancel(f func()) {
+	old := fd.cancel
+	fd.cancel = func() {
+		old()
+		f()
+	}
+}
+
+func (fd *FileDiscipline) Watch(logger Logger) (<-chan net.IP, error) {
+	var ch = make(chan net.IP, 1024)
+	fd.addCancel(func() {
+		close(ch)
+	})
+	for _, f := range fd.Files {
+		t, err := fd.tail(f)
 		if err != nil {
-			return err
+			close(ch)
+			return nil, err
 		}
 		fd.wg.Add(1)
-		go func() {
+		go func(t *tail.Tail, f string) {
 			defer fd.wg.Done()
+			logger.Debugf("[discipline] watch file: %s", f)
 			for {
 				select {
 				case <-fd.ctx.Done():
 					t.Stop()
 					t.Cleanup()
 					return
-				case f := <-t.Lines:
-					if len(f.Text) > 0 {
-						fd.doLine(f.Text, banip, logger)
+				case line := <-t.Lines:
+					if line.Err != nil {
+						logger.Errorf("[discipline] tail file fail, retry %s: %v", f, line.Err)
+						nt, err := fd.tail(f)
+						if err != nil {
+							logger.Errorf("[discipline] tail file fail: %v", err)
+							fd.cancel()
+							close(ch)
+							return
+						}
+						t = nt
+						continue
+					}
+					logger.Debugf("[discipline] get line from %s: length=%d", f, len(line.Text))
+					if len(line.Text) > 0 {
+						fd.doLine(f, line.Text, ch, logger)
 					}
 				}
 			}
-		}()
+		}(t, f)
 	}
-	return nil
+	return ch, nil
 }
 
 func (fd *FileDiscipline) Close() error {
@@ -111,20 +156,24 @@ func (fd *FileDiscipline) Close() error {
 	return nil
 }
 
-func (fd *FileDiscipline) doLine(line string, ch chan<- net.IP, logger Logger) {
+func (fd *FileDiscipline) doLine(f, line string, ch chan<- net.IP, logger Logger) {
 	var groups []string
 	for _, re := range fd.regexes {
 		groups = re.FindStringSubmatch(line)
 		if len(groups) > 0 {
 			line = groups[0]
 		} else {
+			logger.Debugf("[discipline] regex not match: %s: length=%d", f, len(line))
 			return
 		}
 	}
 	if len(groups) > fd.ipGroup {
 		ip := groups[fd.ipGroup]
 		if fd.Counter.Add(ip) {
+			logger.Infof("[discipline] arrest: %s", ip)
 			ch <- net.ParseIP(ip)
+		} else {
+			logger.Infof("[discipline] watch-on: %s", ip)
 		}
 	}
 }

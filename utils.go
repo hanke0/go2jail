@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -177,4 +179,56 @@ func (c *Counter) Stop() {
 		c.cancel()
 	}
 	c.wg.Wait()
+}
+
+type Logger interface {
+	Debugf(format string, args ...interface{})
+	Infof(format string, args ...interface{})
+	Errorf(format string, args ...interface{})
+	raw() *log.Logger
+}
+
+type logger struct {
+	log   *log.Logger
+	level int
+}
+
+const (
+	LevelDebug = 1 + iota
+	LevelInfo
+	LevelWarning
+	LevelError
+)
+
+func NewLogger(level int, output io.Writer) Logger {
+	l := logger{
+		log:   log.New(output, "", log.Ltime|log.Ldate|log.Lshortfile),
+		level: level,
+	}
+	return &l
+}
+
+func (l *logger) raw() *log.Logger {
+	return l.log
+}
+
+func (l *logger) Debugf(format string, args ...interface{}) {
+	if l.level > LevelDebug {
+		return
+	}
+	l.log.Output(3, "[DEBUG] "+fmt.Sprintf(format, args...))
+}
+
+func (l *logger) Infof(format string, args ...interface{}) {
+	if l.level > LevelInfo {
+		return
+	}
+	l.log.Output(3, "[INFO] "+fmt.Sprintf(format, args...))
+}
+
+func (l *logger) Errorf(format string, args ...interface{}) {
+	if l.level > LevelError {
+		return
+	}
+	l.log.Output(3, "[ERROR] "+fmt.Sprintf(format, args...))
 }

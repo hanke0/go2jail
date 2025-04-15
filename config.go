@@ -12,6 +12,7 @@ type BaseJail struct {
 	ID   string `yaml:"id"`
 	Type string `yaml:"type"`
 }
+
 type Jail struct {
 	BaseJail
 	Action Jailer `yaml:"-"`
@@ -34,9 +35,9 @@ func (j *Jail) UnmarshalYAML(b []byte) error {
 }
 
 type BaseDiscipline struct {
-	ID     string `yaml:"id"`
-	Jail   string `yaml:"jail"`
-	Source string `yaml:"source"`
+	ID     string   `yaml:"id"`
+	Jail   []string `yaml:"jail"`
+	Source string   `yaml:"source"`
 }
 
 type Discipline struct {
@@ -66,7 +67,7 @@ type Jailer interface {
 }
 
 type Discipliner interface {
-	Watch(banip chan<- net.IP, log Logger) error
+	Watch(log Logger) (<-chan net.IP, error)
 	Close() error
 }
 

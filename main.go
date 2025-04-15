@@ -2,13 +2,12 @@ package main
 
 import (
 	"flag"
-	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 var flags struct {
@@ -23,13 +22,23 @@ func init() {
 	flag.IntVar(&flags.LogLevel, "log-level", LevelWarning, "log level, set debug to error[0,4]")
 }
 
+var stops []func()
+
+func atexit(fn func()) {
+	stops = append(stops, fn)
+}
+
+func cleanup() {
+	for _, s := range stops {
+		s()
+	}
+}
+
 func main() {
 	flag.Parse()
 	var (
-		logger   Logger
-		closeLog = func() {}
+		logger Logger
 	)
-
 	switch flags.LogFile {
 	case "stdout", "-":
 		logger = NewLogger(flags.LogLevel, os.Stdout)
@@ -40,15 +49,15 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		closeLog = func() {
+		atexit(func() {
 			f.Close()
-		}
+		})
 		logger = NewLogger(flags.LogLevel, f)
 	}
 
 	entries, err := os.ReadDir(flags.ConfigDir)
 	if err != nil {
-		closeLog()
+		cleanup()
 		log.Fatal(err)
 	}
 	var configs []string
@@ -61,61 +70,26 @@ func main() {
 		}
 	}
 	if len(configs) == 0 {
-		closeLog()
+		cleanup()
 		log.Fatal("cannot find config in ", flags.ConfigDir)
 	}
 	cfg, err := Parse(configs...)
 	if err != nil {
-		closeLog()
+		cleanup()
 		log.Fatal(err)
 	}
-	stop, err := Start(cfg, logger)
+	stop, wait, err := Start(cfg, logger)
 	if err != nil {
-		closeLog()
+		cleanup()
 		log.Fatal(err)
 	}
 	ch := make(chan os.Signal, 1024)
-	signal.Notify(ch)
-	for range ch {
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		s := <-ch
+		logger.Infof("receive signal %s, stopping...", s)
 		stop()
-		closeLog()
-	}
-}
-
-type Logger interface {
-	Infof(format string, args ...interface{})
-	Errorf(format string, args ...interface{})
-}
-
-type logger struct {
-	log   *log.Logger
-	level int
-}
-
-const (
-	LevelDebug = 1 + iota
-	LevelInfo
-	LevelWarning
-	LevelError
-)
-
-func NewLogger(level int, output io.Writer) Logger {
-	l := logger{
-		log:   log.New(output, "", log.Ltime|log.Ldate|log.Lshortfile),
-		level: level,
-	}
-	return &l
-}
-func (l *logger) Infof(format string, args ...interface{}) {
-	if l.level < LevelInfo {
-		return
-	}
-	l.log.Output(3, fmt.Sprintf(format, args...))
-}
-
-func (l *logger) Errorf(format string, args ...interface{}) {
-	if l.level < LevelError {
-		return
-	}
-	l.log.Output(3, fmt.Sprintf(format, args...))
+	}()
+	wait()
+	cleanup()
 }
