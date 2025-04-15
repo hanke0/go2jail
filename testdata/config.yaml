@@ -1,7 +1,7 @@
 jail:
   - id: nft
     sudo: true
-    nft_executable: /tmp/nft
+    nft_executable: nft
     type: nftset
     rule: inet
     table: filter

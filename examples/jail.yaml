@@ -1,0 +1,24 @@
+# This file lists all available jails.
+jail:
+  # Type nftset run following commands to block ip:
+  # nft add element inet filter ipv4_block_set { 1.1.1.1 }
+  - id: nft
+    type: nftset
+    #sudo: false # run nft command without sudo
+    #nft_executable: nft # nft executable path
+    rule: inet # nft rule name
+    table: filter # nft table name
+    ipv4_set: ipv4_block_set # nft set name for ipv4
+    ipv6_set: ipv6_block_set # nft set name for ipv6
+
+  # echo only print ip
+  - id: echo
+    type: echo
+
+  # run shell script to block ip
+  # Any arguments contains '%(ip)' will be replaced by ip.
+  # The default args is ['%(ip)']
+  - id: shell
+    type: shell
+    command: echo
+    #args: ['%(ip)']
