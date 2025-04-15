@@ -8,14 +8,17 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
+type BaseJail struct {
+	ID   string `yaml:"id"`
+	Type string `yaml:"type"`
+}
 type Jail struct {
-	ID     string `yaml:"id"`
-	Type   string `yaml:"type"`
+	BaseJail
 	Action Jailer `yaml:"-"`
 }
 
 func (j *Jail) UnmarshalYAML(b []byte) error {
-	if err := yaml.Unmarshal(b, j); err != nil {
+	if err := yaml.Unmarshal(b, j.BaseJail); err != nil {
 		return err
 	}
 	builder := jailProviders[j.Type]
@@ -30,15 +33,19 @@ func (j *Jail) UnmarshalYAML(b []byte) error {
 	return nil
 }
 
+type BaseDiscipline struct {
+	ID     string `yaml:"id"`
+	Jail   string `yaml:"jail"`
+	Source string `yaml:"source"`
+}
+
 type Discipline struct {
-	ID     string      `yaml:"id"`
-	Jail   string      `yaml:"jail"`
-	Source string      `yaml:"source"`
+	BaseDiscipline
 	Action Discipliner `yaml:"-"`
 }
 
 func (j *Discipline) UnmarshalYAML(b []byte) error {
-	if err := yaml.Unmarshal(b, j); err != nil {
+	if err := yaml.Unmarshal(b, &j.BaseDiscipline); err != nil {
 		return err
 	}
 	builder := disciplineProviders[j.Source]
