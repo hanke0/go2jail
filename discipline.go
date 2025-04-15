@@ -20,6 +20,7 @@ func init() {
 type FileDiscipline struct {
 	Files   []string `yaml:"files"`
 	Regexes []string `yaml:"regexes"`
+	Counter Counter  `yaml:"counter"`
 	regexes []*regexp.Regexp
 	ctx     context.Context
 	cancel  func()
@@ -106,6 +107,7 @@ func (fd *FileDiscipline) Watch(banip chan<- net.IP, logger Logger) error {
 func (fd *FileDiscipline) Close() error {
 	fd.cancel()
 	fd.wg.Wait()
+	fd.Counter.Stop()
 	return nil
 }
 
@@ -121,6 +123,8 @@ func (fd *FileDiscipline) doLine(line string, ch chan<- net.IP, logger Logger) {
 	}
 	if len(groups) > fd.ipGroup {
 		ip := groups[fd.ipGroup]
-		ch <- net.ParseIP(ip)
+		if fd.Counter.Add(ip) {
+			ch <- net.ParseIP(ip)
+		}
 	}
 }

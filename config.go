@@ -150,7 +150,7 @@ func mergeConfig(dst, src *Config) {
 	dst.Discipline = appendIf(dst.Discipline, src.Discipline, func(a, b *Discipline) bool {
 		return a.ID == b.ID
 	})
-	dst.Allows = appendIf(dst.Allows, src.Allows, func(a, b ipCidr) bool {
+	dst.Allow = appendIf(dst.Allow, src.Allow, func(a, b ipCidr) bool {
 		return a.Equal(b)
 	})
 }

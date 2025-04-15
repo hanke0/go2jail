@@ -3,9 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/goccy/go-yaml"
 )
 
 type RingBuffer struct {
@@ -83,4 +88,90 @@ func Execute(opt ExecuteOptions) (string, error) {
 		return string(buf.Bytes()), err
 	}
 	return "", err
+}
+
+type counterStats struct {
+	n          int
+	expiration time.Time
+}
+
+type Counter struct {
+	max     int
+	timeout time.Duration
+	sync.Once
+	mu     sync.Mutex
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel func()
+	mp     map[string]*counterStats
+}
+
+func (c *Counter) UnmarshalYAML(b []byte) error {
+	var s string
+	if err := yaml.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	parts := strings.Split(s, "/")
+	if len(parts) != 2 {
+		return fmt.Errorf("bad counter: %s", s)
+	}
+	max, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return fmt.Errorf("bad counter: %s", s)
+	}
+	timeout, err := time.ParseDuration(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return fmt.Errorf("bad counter: %s", s)
+	}
+	c.max = max
+	c.timeout = timeout
+	return nil
+}
+
+func (c *Counter) startBackground() {
+	c.wg.Add(1)
+	c.ctx, c.cancel = context.WithCancel(context.Background())
+	go func() {
+		tick := time.NewTicker(c.timeout)
+		for {
+			select {
+			case <-c.ctx.Done():
+				tick.Stop()
+				c.wg.Done()
+				return
+			case <-tick.C:
+				c.mu.Lock()
+				for k, v := range c.mp {
+					if v.expiration.Before(time.Now()) {
+						delete(c.mp, k)
+					}
+				}
+				c.mu.Unlock()
+			}
+
+		}
+	}()
+}
+
+func (c *Counter) Add(s string) bool {
+	c.Once.Do(c.startBackground)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v := c.mp[s]
+	if v == nil || v.expiration.Before(time.Now()) {
+		v = &counterStats{
+			n:          0,
+			expiration: time.Now().Add(c.timeout),
+		}
+		c.mp[s] = v
+	}
+	v.n++
+	return v.n >= c.max
+}
+
+func (c *Counter) Stop() {
+	if c.cancel != nil {
+		c.cancel()
+	}
+	c.wg.Wait()
 }
