@@ -157,6 +157,9 @@ func (c *Counter) Add(s string) bool {
 	c.Once.Do(c.startBackground)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.mp == nil {
+		c.mp = map[string]*counterStats{}
+	}
 	v := c.mp[s]
 	if v == nil || v.expiration.Before(time.Now()) {
 		v = &counterStats{
