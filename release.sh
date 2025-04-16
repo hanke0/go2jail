@@ -34,7 +34,7 @@ git show-ref --tags -d || true
 revid="$(git rev-parse HEAD)${dirty}"
 tag=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
 if [ -z "$tag" ]; then
-    latesttag=$(git show-ref --tags -d | tail -1 | grep -Eo 'v[a-z0-9\.\-]+')
+    latesttag=$(git show-ref --tags -d | tail -1 | grep -Eo 'v[a-z0-9\.\-]+' || true)
     if [ -z "$latesttag" ]; then
         latesttag="v0.0.1-unknown"
     fi
