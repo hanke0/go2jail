@@ -79,17 +79,20 @@ func Execute(opt ExecuteOptions) (string, error) {
 		cmd.Stdout = buf
 		cmd.Stderr = cmd.Stdout
 	}
-	if err := cmd.Start(); err != nil {
+	err := cmd.Start()
+	if err == nil {
+		err = cmd.Wait()
+	}
+	if err != nil {
 		if buf != nil {
-			return string(buf.Bytes()), err
+			return string(buf.Bytes()), fmt.Errorf("%w: args=%v", err, opt.Program)
 		}
-		return "", err
+		return "", fmt.Errorf("%w: args=%v", err, opt.Program)
 	}
-	err := cmd.Wait()
-	if buf != nil {
-		return string(buf.Bytes()), err
+	if buf == nil {
+		return "", nil
 	}
-	return "", err
+	return string(buf.Bytes()), nil
 }
 
 type counterStats struct {
@@ -156,6 +159,9 @@ func (c *Counter) startBackground() {
 }
 
 func (c *Counter) Add(s string) bool {
+	if c.timeout == 0 {
+		c.timeout = time.Second
+	}
 	c.Once.Do(c.startBackground)
 	c.mu.Lock()
 	defer c.mu.Unlock()

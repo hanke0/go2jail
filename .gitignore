@@ -27,3 +27,5 @@ go.work.sum
 /go2jail
 /dist
 /tmp
+/cover.out
+/cover.html

@@ -11,7 +11,7 @@ import (
 	"syscall"
 )
 
-var flags struct {
+type Flags struct {
 	LogLevel   int
 	LogFile    string
 	ConfigDir  string
@@ -20,6 +20,8 @@ var flags struct {
 	Version    bool
 }
 
+var flags Flags
+
 func init() {
 	flag.StringVar(&flags.LogFile, "log-file", "stderr", "log file definition. support special value: stdout(or -), stderr")
 	flag.StringVar(&flags.ConfigDir, "config-dir", "./", "config file directory. load yaml files by lexicographically order.")
@@ -27,18 +29,6 @@ func init() {
 	flag.BoolVar(&flags.TestConfig, "test-config", false, "test config file")
 	flag.BoolVar(&flags.Version, "version", false, "show version")
 	flag.IntVar(&flags.LogLevel, "log-level", LevelWarning, "log level, set debug to error[0,4]")
-}
-
-var stops []func()
-
-func atexit(fn func()) {
-	stops = append(stops, fn)
-}
-
-func cleanup() {
-	for _, s := range stops {
-		s()
-	}
 }
 
 var (
@@ -58,13 +48,40 @@ func main() {
 		printVersion()
 		return
 	}
+	wait, stop, err := entry(&flags)
+	if err != nil {
+		log.Fatal(err)
+	}
+	ch := make(chan os.Signal, 1024)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		s := <-ch
+		log.Printf("receive signal %s, stopping...", s)
+		stop()
+	}()
+	wait()
+}
+
+func entry(flags *Flags) (wait, stop func(), err error) {
 	var (
 		logger Logger
+		stops  []func()
+
+		atexit = func(fn func()) {
+			stops = append(stops, fn)
+		}
+
+		cleanup = func() {
+			for i := len(stops) - 1; i >= 0; i-- {
+				stops[i]()
+			}
+		}
 	)
+
 	switch flags.LogFile {
 	case "stdout", "-":
 		logger = NewLogger(flags.LogLevel, os.Stdout)
-	case "stderr":
+	case "stderr", "":
 		logger = NewLogger(flags.LogLevel, os.Stdout)
 	default:
 		f, err := os.OpenFile(flags.LogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0640)
@@ -80,7 +97,7 @@ func main() {
 	entries, err := os.ReadDir(flags.ConfigDir)
 	if err != nil {
 		cleanup()
-		log.Fatal(err)
+		return nil, nil, err
 	}
 	var configs []string
 	for _, e := range entries {
@@ -93,30 +110,24 @@ func main() {
 	}
 	if len(configs) == 0 {
 		cleanup()
-		log.Fatal("cannot find config in ", flags.ConfigDir)
+		return nil, nil, fmt.Errorf("cannot find config in %s", flags.ConfigDir)
 	}
 	cfg, err := Parse(configs...)
 	if err != nil {
 		cleanup()
-		log.Fatal(err)
+		return nil, nil, err
 	}
 	if flags.TestConfig {
 		cleanup()
-		return
+		return nothing, nothing, nil
 	}
-
-	stop, wait, err := Start(cfg, logger, flags.Test)
-	if err != nil {
+	stop, wait, err1 := Start(cfg, logger, flags.Test)
+	if err1 != nil {
 		cleanup()
-		log.Fatal(err)
+		return nil, nil, err1
 	}
-	ch := make(chan os.Signal, 1024)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		s := <-ch
-		logger.Infof("receive signal %s, stopping...", s)
-		stop()
-	}()
-	wait()
-	cleanup()
+	atexit(stop)
+	return wait, cleanup, nil
 }
+
+func nothing() {}

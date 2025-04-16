@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -21,15 +22,16 @@ func init() {
 }
 
 type FileDiscipline struct {
-	ID      string   `yaml:"id"`
-	Files   []string `yaml:"files"`
-	Regexes []string `yaml:"regexes"`
-	Counter Counter  `yaml:"counter"`
-	regexes []*regexp.Regexp
-	ctx     context.Context
-	cancel  func()
-	wg      sync.WaitGroup
-	wgCount atomic.Int32
+	ID                    string   `yaml:"id"`
+	Files                 []string `yaml:"files"`
+	Regexes               []string `yaml:"regexes"`
+	Counter               Counter  `yaml:"counter"`
+	SkipWhenFileNotExists bool     `yaml:"skip_when_file_not_exists"`
+	regexes               []*regexp.Regexp
+	ctx                   context.Context
+	cancel                func()
+	wg                    sync.WaitGroup
+	wgCount               atomic.Int32
 
 	ipGroup int
 }
@@ -89,6 +91,7 @@ func (fd *FileDiscipline) tail(f string, testing bool) (t *tail.Tail, err error)
 		Follow:    true,
 		ReOpen:    true,
 		MustExist: true,
+		Poll:      true,
 		Logger:    tail.DiscardingLogger,
 	}
 	if testing {
@@ -126,6 +129,12 @@ func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, err
 	ch := NewChan[net.IP](1024)
 	fd.addCancel(ch.Close)
 	for _, f := range fd.Files {
+		if fd.SkipWhenFileNotExists {
+			_, err := os.Open(f)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+		}
 		t, err := fd.tail(f, testing)
 		if err != nil {
 			fd.cancel()
@@ -146,19 +155,16 @@ func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, err
 				case <-fd.ctx.Done():
 					logger.Infof("[discipline][%s] file closed: %s", fd.ID, f)
 					t.Stop()
-					t.Cleanup()
 					return
 				case line, ok := <-t.Lines:
 					if !ok {
 						logger.Infof("[discipline][%s] file closed: %s", fd.ID, f)
 						t.Stop()
-						t.Cleanup()
 						return
 					}
 					if line.Err != nil {
 						logger.Errorf("[discipline][%s] tail file fail %s: %v", fd.ID, f, line.Err)
 						t.Stop()
-						t.Cleanup()
 						fd.cancel()
 						return
 					}
