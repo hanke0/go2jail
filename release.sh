@@ -24,6 +24,13 @@ dirty=
 if ! git diff-files --quiet; then
     dirty="-dirty"
 fi
+echo "rev:"
+git rev-parse HEAD
+echo "current tag:"
+git describe --tags --exact-match HEAD
+echo "tags:"
+git show-ref --tags -d
+
 revid="$(git rev-parse HEAD)${dirty}"
 tag=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
 if [ -z "$tag" ]; then
