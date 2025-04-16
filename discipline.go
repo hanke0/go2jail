@@ -21,6 +21,7 @@ func init() {
 }
 
 type FileDiscipline struct {
+	ID      string   `yaml:"id"`
 	Files   []string `yaml:"files"`
 	Regexes []string `yaml:"regexes"`
 	Counter Counter  `yaml:"counter"`
@@ -144,29 +145,29 @@ func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, err
 					fd.cancel()
 				}
 			}()
-			logger.Debugf("[discipline] watch file: %s", f)
+			logger.Debugf("[discipline][%s] watch file: %s", fd.ID, f)
 			for {
 				select {
 				case <-fd.ctx.Done():
-					logger.Infof("[discipline] file closed: %s", f)
+					logger.Infof("[discipline][%s] file closed: %s", fd.ID, f)
 					t.Stop()
 					t.Cleanup()
 					return
 				case line, ok := <-t.Lines:
 					if !ok {
-						logger.Infof("[discipline] file closed: %s", f)
+						logger.Infof("[discipline][%s] file closed: %s", fd.ID, f)
 						t.Stop()
 						t.Cleanup()
 						return
 					}
 					if line.Err != nil {
-						logger.Errorf("[discipline] tail file fail %s: %v", f, line.Err)
+						logger.Errorf("[discipline][%s] tail file fail %s: %v", fd.ID, f, line.Err)
 						t.Stop()
 						t.Cleanup()
 						fd.cancel()
 						return
 					}
-					logger.Debugf("[discipline] get line from %s: length=%d", f, len(line.Text))
+					logger.Debugf("[discipline][%s] get line from %s: length=%d", fd.ID, f, len(line.Text))
 					if len(line.Text) > 0 {
 						fd.doLine(f, line.Text, ch, logger)
 					}
@@ -191,7 +192,7 @@ func (fd *FileDiscipline) doLine(f, line string, ch chan<- net.IP, logger Logger
 		if len(groups) > 0 {
 			line = groups[0]
 		} else {
-			logger.Debugf("[discipline] regex not match: %s: length=%d", f, len(line))
+			logger.Debugf("[discipline][%s] regex not match: %s: length=%d", fd.ID, f, len(line))
 			return
 		}
 	}
@@ -202,10 +203,10 @@ func (fd *FileDiscipline) doLine(f, line string, ch chan<- net.IP, logger Logger
 		}
 		sip := ip.String()
 		if fd.Counter.Add(sip) {
-			logger.Infof("[discipline] arrest: %s", sip)
+			logger.Errorf("[discipline][%s] arrest: %s", fd.ID, sip)
 			ch <- ip
 		} else {
-			logger.Infof("[discipline] watch-on: %s", sip)
+			logger.Infof("[discipline][%s] watch-on: %s", fd.ID, sip)
 		}
 	}
 }

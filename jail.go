@@ -16,6 +16,7 @@ func init() {
 }
 
 type NftJail struct {
+	ID            string `yaml:"id"`
 	Sudo          bool   `yaml:"sudo"`
 	NftExecutable string `yaml:"nft_executable"`
 	Rule          string `yaml:"rule"`
@@ -74,7 +75,7 @@ func (nj *NftJail) Arrest(ip net.IP, log Logger) error {
 		Timeout:    time.Second * 5,
 	})
 	if err != nil {
-		log.Errorf("[jail-nft] arrest ip %s: err=%v, output=%s", s, err, f)
+		log.Errorf("[jail-nft][%s] arrest ip %s: err=%v, output=%s", nj.ID, s, err, f)
 	}
 	return err
 }
@@ -84,6 +85,7 @@ func (nj *NftJail) Close() error {
 }
 
 type EchoJail struct {
+	ID string `yaml:"id"`
 }
 
 func NewEchoJail(b []byte) (Jailer, error) {
@@ -91,7 +93,7 @@ func NewEchoJail(b []byte) (Jailer, error) {
 }
 
 func (ej *EchoJail) Arrest(ip net.IP, log Logger) error {
-	log.Errorf("[jail-echo] arrest ip %s", ip)
+	log.Errorf("[jail-echo][%s] arrest ip %s", ej.ID, ip)
 	return nil
 }
 
@@ -100,6 +102,7 @@ func (ej *EchoJail) Close() error {
 }
 
 type ShellJail struct {
+	ID      string   `yaml:"id"`
 	Command string   `yaml:"command"`
 	Args    []string `yaml:"args"`
 }
@@ -134,7 +137,7 @@ func (sj *ShellJail) Arrest(ip net.IP, log Logger) error {
 		OutputSize: 1024,
 	})
 	if err != nil {
-		log.Errorf("[jail-shell] arrest ip %s fail: %v, %s", ip, err, c)
+		log.Errorf("[jail-shell][%s] arrest ip %s fail: %v, %s", sj.ID, ip, err, c)
 	}
 	return err
 }
