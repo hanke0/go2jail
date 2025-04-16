@@ -123,17 +123,12 @@ func (fd *FileDiscipline) Test(logger Logger) (<-chan net.IP, error) {
 }
 
 func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, error) {
-	var ch = make(chan net.IP, 1024)
-	var once sync.Once
-	fd.addCancel(func() {
-		once.Do(func() {
-			close(ch)
-		})
-	})
+	ch := NewChan[net.IP](1024)
+	fd.addCancel(ch.Close)
 	for _, f := range fd.Files {
 		t, err := fd.tail(f, testing)
 		if err != nil {
-			close(ch)
+			fd.cancel()
 			return nil, err
 		}
 		fd.wg.Add(1)
@@ -175,7 +170,7 @@ func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, err
 			}
 		}(t, f)
 	}
-	return ch, nil
+	return ch.Reader(), nil
 }
 
 func (fd *FileDiscipline) Close() error {
@@ -185,7 +180,7 @@ func (fd *FileDiscipline) Close() error {
 	return nil
 }
 
-func (fd *FileDiscipline) doLine(f, line string, ch chan<- net.IP, logger Logger) {
+func (fd *FileDiscipline) doLine(f, line string, ch *Chan[net.IP], logger Logger) {
 	var groups []string
 	for _, re := range fd.regexes {
 		groups = re.FindStringSubmatch(line)
@@ -203,8 +198,11 @@ func (fd *FileDiscipline) doLine(f, line string, ch chan<- net.IP, logger Logger
 		}
 		sip := ip.String()
 		if fd.Counter.Add(sip) {
-			logger.Errorf("[discipline][%s] arrest: %s", fd.ID, sip)
-			ch <- ip
+			if ch.Send(ip) {
+				logger.Errorf("[discipline][%s] arrest: %s", fd.ID, sip)
+			} else {
+				logger.Errorf("[discipline][%s] arrest send interrupt: %s", fd.ID, sip)
+			}
 		} else {
 			logger.Infof("[discipline][%s] watch-on: %s", fd.ID, sip)
 		}

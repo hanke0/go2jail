@@ -232,3 +232,38 @@ func (l *logger) Errorf(format string, args ...interface{}) {
 	}
 	l.log.Output(3, "[ERROR] "+fmt.Sprintf(format, args...))
 }
+
+type Chan[T any] struct {
+	ch     chan T
+	closed bool
+	once   sync.Once
+}
+
+func NewChan[T any](size int) *Chan[T] {
+	return &Chan[T]{
+		ch: make(chan T, size),
+	}
+}
+
+func (c *Chan[T]) Close() {
+	c.once.Do(func() {
+		close(c.ch)
+		c.closed = true
+	})
+}
+
+func (c *Chan[T]) Send(v T) (ok bool) {
+	if c.closed {
+		return false
+	}
+	defer func() {
+		recover()
+		ok = false
+	}()
+	c.ch <- v
+	return true
+}
+
+func (c *Chan[T]) Reader() <-chan T {
+	return c.ch
+}
