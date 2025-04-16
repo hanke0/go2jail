@@ -123,8 +123,11 @@ func (fd *FileDiscipline) Test(logger Logger) (<-chan net.IP, error) {
 
 func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, error) {
 	var ch = make(chan net.IP, 1024)
+	var once sync.Once
 	fd.addCancel(func() {
-		close(ch)
+		once.Do(func() {
+			close(ch)
+		})
 	})
 	for _, f := range fd.Files {
 		t, err := fd.tail(f, testing)
