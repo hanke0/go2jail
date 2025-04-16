@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ var flags struct {
 	ConfigDir  string
 	Test       string
 	TestConfig bool
+	Version    bool
 }
 
 func init() {
@@ -23,6 +25,7 @@ func init() {
 	flag.StringVar(&flags.ConfigDir, "config-dir", "./", "config file directory. load yaml files by lexicographically order.")
 	flag.StringVar(&flags.Test, "test", "", "test discipline id")
 	flag.BoolVar(&flags.TestConfig, "test-config", false, "test config file")
+	flag.BoolVar(&flags.Version, "version", false, "show version")
 	flag.IntVar(&flags.LogLevel, "log-level", LevelWarning, "log level, set debug to error[0,4]")
 }
 
@@ -38,8 +41,23 @@ func cleanup() {
 	}
 }
 
+var (
+	Version   = "v0.0.1-unknown"
+	Rev       = "unknown-rev"
+	GoVersion = "unknown-go"
+	BuildTime = "unknown-time"
+)
+
+func printVersion() {
+	fmt.Printf("go2jail %s (%s) build by %s at %s\n", Version, Rev, GoVersion, BuildTime)
+}
+
 func main() {
 	flag.Parse()
+	if flags.Version {
+		printVersion()
+		return
+	}
 	var (
 		logger Logger
 	)
