@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"text/template"
@@ -52,7 +51,6 @@ echo "$@" >>"$dir/nft.log"
 }
 
 func TestBasicLogAndNftReject(t *testing.T) {
-	t.Log(runtime.GOOS, runtime.GOARCH)
 	dir := makeTestConfig(t, `
 jail:
   - id: nft
@@ -109,6 +107,42 @@ discipline:
 	require.Equal(t, `add element inet filter ipv4_block_set { 1.1.1.1 }
 add element inet filter ipv4_block_set { 2.2.2.2 }
 `, string(b))
+}
+
+func TestTestingWorks(t *testing.T) {
+	dir := makeTestConfig(t, `
+jail:
+  - id: log
+    type: log
+discipline:
+  - id: test
+    source: log
+    jail: [log]
+    files: [{{.dir}}/test.log]
+    regexes: ['%(ip)']
+    counter: 1/s
+`)
+	watchfile := filepath.Join(dir, "test.log")
+	err := os.WriteFile(watchfile, []byte("1.1.1.1\n2.2.2.2\n"), 0777)
+	require.NoError(t, err)
+
+	stdout := Stdout
+	t.Cleanup(func() {
+		Stdout = stdout
+	})
+	var bs strings.Builder
+	Stdout = &bs
+	flags := Flags{
+		ConfigDir:      dir,
+		LogLevel:       LevelDebug,
+		TestDiscipline: "test",
+	}
+	wait, _, err := entry(&flags)
+	require.NoError(t, err)
+	wait()
+	require.Equal(t, `1.1.1.1
+2.2.2.2
+`, bs.String())
 }
 
 func TestFileNotExistsOK(t *testing.T) {

@@ -126,7 +126,7 @@ func (fd *FileDiscipline) Test(logger Logger) (<-chan net.IP, error) {
 }
 
 func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, error) {
-	ch := NewChan[net.IP](1024)
+	ch := NewChan[net.IP](0)
 	fd.addCancel(ch.Close)
 	for _, f := range fd.Files {
 		if fd.SkipWhenFileNotExists {

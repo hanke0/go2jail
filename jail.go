@@ -6,12 +6,13 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/stretchr/testify/assert/yaml"
+	"github.com/goccy/go-yaml"
 )
 
 func init() {
 	RegisterJail("nftset", NewNftJail)
 	RegisterJail("echo", NewEchoJail)
+	RegisterJail("log", NewEchoJail)
 	RegisterJail("shell", NewShellJail)
 }
 
@@ -84,20 +85,40 @@ func (nj *NftJail) Close() error {
 	return nil
 }
 
-type EchoJail struct {
-	ID string `yaml:"id"`
-}
+type EchoJail struct{}
 
 func NewEchoJail(b []byte) (Jailer, error) {
 	return &EchoJail{}, nil
 }
 
 func (ej *EchoJail) Arrest(ip net.IP, log Logger) error {
-	log.Errorf("[jail-echo][%s] arrest ip %s", ej.ID, ip)
+	fmt.Fprintln(Stdout, ip.String())
 	return nil
 }
 
 func (ej *EchoJail) Close() error {
+	return nil
+}
+
+type LogJail struct {
+	ID string `yaml:"id"`
+}
+
+func NewLogJail(b []byte) (Jailer, error) {
+	var j LogJail
+	err := yaml.Unmarshal(b, &j)
+	if err != nil {
+		return nil, err
+	}
+	return &j, nil
+}
+
+func (ej *LogJail) Arrest(ip net.IP, log Logger) error {
+	log.Errorf("[jail-echo][%s] arrest ip %s", ej.ID, ip)
+	return nil
+}
+
+func (ej *LogJail) Close() error {
 	return nil
 }
 

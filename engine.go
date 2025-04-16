@@ -9,39 +9,50 @@ import (
 )
 
 func Start(cfg *Config, logger Logger, test string) (stop, wait func(), err error) {
-	var waits []func()
-	waitAll := func() {
-		for _, w := range waits {
-			w()
-		}
-	}
+	var cleaner Cleaner
 	ctx, cancel := context.WithCancel(context.Background())
 	for _, v := range cfg.Discipline {
-		testing := test != ""
-		if testing && v.ID != test {
-			continue
+		var (
+			jails     []*Jail
+			testing   = test != ""
+			jailNames = v.Jail
+		)
+		if testing {
+			if v.ID != test {
+				continue
+			}
+			jailNames = nil
+			e, _ := NewEchoJail(nil)
+			jails = append(jails, &Jail{
+				BaseJail: BaseJail{ID: "test-config", Type: "echo"},
+				Action:   e,
+			})
 		}
-		var jails []*Jail
-		for _, j := range v.Jail {
+		for _, j := range jailNames {
 			idx := slices.IndexFunc(cfg.Jail, func(e *Jail) bool {
 				return e.ID == j
 			})
 			if idx < 0 {
 				cancel()
-				waitAll()
+				cleaner.Clean()
 				return nil, nil, fmt.Errorf("jail id not exist: %s", v.Jail)
 			}
 			jails = append(jails, cfg.Jail[idx])
 		}
-		s, err := runDiscipline(ctx, cfg, v, jails, logger, testing)
+		wait, err := runDiscipline(ctx, cfg, v, jails, logger, testing)
 		if err != nil {
 			cancel()
-			waitAll()
+			cleaner.Clean()
 			return nil, nil, err
 		}
-		waits = append(waits, s)
+		cleaner.Push(wait)
 	}
-	return cancel, waitAll, nil
+	if cleaner.Len() == 0 {
+		cancel()
+		cleaner.Clean()
+		return nothing, nothing, nil
+	}
+	return cancel, cleaner.Clean, nil
 }
 
 func runDiscipline(ctx context.Context,
@@ -68,25 +79,21 @@ func runDiscipline(ctx context.Context,
 			case <-ctx.Done():
 				err := d.Action.Close()
 				if err != nil {
-					log.Errorf("close discipline fail: %v", err)
+					log.Errorf("[engine][discipline][%s] close discipline fail: %v", d.ID, err)
 				}
 				return
 			case ip, ok := <-ch:
 				if !ok {
-					log.Debugf("[jail] watch channel close: %s", d.ID)
+					log.Debugf("[engine][discipline][%s] watch channel close", d.ID)
 					return
 				}
 				if cfg.AllowIP(ip) ||
 					ip.IsLoopback() || ip.IsUnspecified() ||
 					ip.IsMulticast() {
-					log.Debugf("[jail] ip is in allow list: %s", ip)
+					log.Debugf("[engine][discipline][%s] ip is in allow list: %s", d.ID, ip)
 					continue
 				}
-				if test {
-					log.Errorf("[jail] test arrest ip: %s", ip)
-				} else {
-					jailIp(js, ip, log)
-				}
+				jailIp(js, ip, log)
 			}
 		}
 	}()
@@ -95,12 +102,12 @@ func runDiscipline(ctx context.Context,
 
 func jailIp(js []*Jail, ip net.IP, log Logger) {
 	for _, j := range js {
-		log.Debugf("[jail][%s] start arrest %s", j.ID, ip)
+		log.Debugf("[engine][jail][%s] start arrest %s", j.ID, ip)
 		err := j.Action.Arrest(ip, log)
 		if err != nil {
-			log.Errorf("[jail][%s] arrest %s fail: %v", j.ID, ip, err)
+			log.Errorf("[engine][jail][%s] arrest %s fail: %v", j.ID, ip, err)
 		} else {
-			log.Infof("[jail][%s] arrest %s success", j.ID, ip)
+			log.Infof("[engine][jail][%s] arrest %s success", j.ID, ip)
 		}
 	}
 }

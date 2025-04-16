@@ -124,7 +124,11 @@ func (c *Counter) UnmarshalYAML(b []byte) error {
 	if err != nil {
 		return fmt.Errorf("bad counter: %s", s)
 	}
-	timeout, err := time.ParseDuration(strings.TrimSpace(parts[1]))
+	d := strings.TrimSpace(parts[1])
+	if !strings.ContainsAny(d, "0123456789") {
+		d = "1" + d
+	}
+	timeout, err := time.ParseDuration(d)
 	if err != nil {
 		return fmt.Errorf("bad counter: %s", s)
 	}
@@ -272,4 +276,26 @@ func (c *Chan[T]) Send(v T) (ok bool) {
 
 func (c *Chan[T]) Reader() <-chan T {
 	return c.ch
+}
+
+type Cleaner struct {
+	cleans []func()
+}
+
+func (c *Cleaner) Prepend(f func()) {
+	c.cleans = append([]func(){f}, c.cleans...)
+}
+
+func (c *Cleaner) Push(f func()) {
+	c.cleans = append(c.cleans, f)
+}
+
+func (c *Cleaner) Clean() {
+	for i := len(c.cleans) - 1; i >= 0; i-- {
+		c.cleans[i]()
+	}
+}
+
+func (c *Cleaner) Len() int {
+	return len(c.cleans)
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -12,12 +13,12 @@ import (
 )
 
 type Flags struct {
-	LogLevel   int
-	LogFile    string
-	ConfigDir  string
-	Test       string
-	TestConfig bool
-	Version    bool
+	LogLevel       int
+	LogFile        string
+	ConfigDir      string
+	TestDiscipline string
+	TestConfig     bool
+	Version        bool
 }
 
 var flags Flags
@@ -25,7 +26,7 @@ var flags Flags
 func init() {
 	flag.StringVar(&flags.LogFile, "log-file", "stderr", "log file definition. support special value: stdout(or -), stderr")
 	flag.StringVar(&flags.ConfigDir, "config-dir", "./", "config file directory. load yaml files by lexicographically order.")
-	flag.StringVar(&flags.Test, "test", "", "test discipline id")
+	flag.StringVar(&flags.TestDiscipline, "test-discipline", "", "test discipline id")
 	flag.BoolVar(&flags.TestConfig, "test-config", false, "test config file")
 	flag.BoolVar(&flags.Version, "version", false, "show version")
 	flag.IntVar(&flags.LogLevel, "log-level", LevelWarning, "log level, set debug to error[0,4]")
@@ -62,33 +63,28 @@ func main() {
 	wait()
 }
 
+var (
+	Stdout io.Writer = os.Stdout
+	Stderr io.Writer = os.Stderr
+)
+
 func entry(flags *Flags) (wait, stop func(), err error) {
 	var (
-		logger Logger
-		stops  []func()
-
-		atexit = func(fn func()) {
-			stops = append(stops, fn)
-		}
-
-		cleanup = func() {
-			for i := len(stops) - 1; i >= 0; i-- {
-				stops[i]()
-			}
-		}
+		logger  Logger
+		cleaner Cleaner
 	)
 
 	switch flags.LogFile {
 	case "stdout", "-":
-		logger = NewLogger(flags.LogLevel, os.Stdout)
+		logger = NewLogger(flags.LogLevel, Stdout)
 	case "stderr", "":
-		logger = NewLogger(flags.LogLevel, os.Stdout)
+		logger = NewLogger(flags.LogLevel, Stderr)
 	default:
 		f, err := os.OpenFile(flags.LogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0640)
 		if err != nil {
 			log.Fatal(err)
 		}
-		atexit(func() {
+		cleaner.Push(func() {
 			f.Close()
 		})
 		logger = NewLogger(flags.LogLevel, f)
@@ -96,7 +92,7 @@ func entry(flags *Flags) (wait, stop func(), err error) {
 
 	entries, err := os.ReadDir(flags.ConfigDir)
 	if err != nil {
-		cleanup()
+		cleaner.Clean()
 		return nil, nil, err
 	}
 	var configs []string
@@ -109,25 +105,25 @@ func entry(flags *Flags) (wait, stop func(), err error) {
 		}
 	}
 	if len(configs) == 0 {
-		cleanup()
+		cleaner.Clean()
 		return nil, nil, fmt.Errorf("cannot find config in %s", flags.ConfigDir)
 	}
 	cfg, err := Parse(configs...)
 	if err != nil {
-		cleanup()
+		cleaner.Clean()
 		return nil, nil, err
 	}
 	if flags.TestConfig {
-		cleanup()
+		cleaner.Clean()
 		return nothing, nothing, nil
 	}
-	stop, wait, err1 := Start(cfg, logger, flags.Test)
+	stop, wait, err1 := Start(cfg, logger, flags.TestDiscipline)
 	if err1 != nil {
-		cleanup()
+		cleaner.Clean()
 		return nil, nil, err1
 	}
-	atexit(stop)
-	return wait, cleanup, nil
+	cleaner.Push(stop)
+	return wait, cleaner.Clean, nil
 }
 
 func nothing() {}
