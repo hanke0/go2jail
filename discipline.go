@@ -176,6 +176,10 @@ func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, err
 			}
 		}(t, f)
 	}
+	if fd.wgCount.Load() == 0 {
+		fd.cancel()
+		return ch.Reader(), nil
+	}
 	return ch.Reader(), nil
 }
 
