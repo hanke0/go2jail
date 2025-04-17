@@ -25,15 +25,21 @@ type FileDiscipline struct {
 	ID                    string   `yaml:"id"`
 	Files                 []string `yaml:"files"`
 	Regexes               []string `yaml:"regexes"`
-	Counter               Counter  `yaml:"counter"`
+	Limit                 Limiter  `yaml:"limit"`
 	SkipWhenFileNotExists bool     `yaml:"skip_when_file_not_exists"`
 	regexes               []*regexp.Regexp
 	ctx                   context.Context
 	cancel                func()
 	wg                    sync.WaitGroup
 	wgCount               atomic.Int32
+	ipGroup               int
 
-	ipGroup int
+	tailLinesCount       *Counter
+	matchLineCount       *Counter
+	badIPLineCount       *Counter
+	watchIPCount         *Counter
+	sendJailSuccessCount *Counter
+	sendJailFailCount    *Counter
 }
 
 var (
@@ -79,6 +85,15 @@ func NewFileDiscipline(b []byte) (Discipliner, error) {
 		return nil, fmt.Errorf("last regex do not contains ip group: %s", last.String())
 	}
 	f.ctx, f.cancel = context.WithCancel(context.Background())
+	if f.ID == "" {
+		f.ID = randomString(8)
+	}
+	f.tailLinesCount = RegisterNewCounter(fmt.Sprintf("%s_tail_lines", f.ID))
+	f.matchLineCount = RegisterNewCounter(fmt.Sprintf("%s_match_lines", f.ID))
+	f.badIPLineCount = RegisterNewCounter(fmt.Sprintf("%s_bad_ip_lines", f.ID))
+	f.watchIPCount = RegisterNewCounter(fmt.Sprintf("%s_watch_ip", f.ID))
+	f.sendJailSuccessCount = RegisterNewCounter(fmt.Sprintf("%s_send_jail_success", f.ID))
+	f.sendJailFailCount = RegisterNewCounter(fmt.Sprintf("%s_send_jail_fail", f.ID))
 	return &f, nil
 }
 
@@ -169,8 +184,11 @@ func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, err
 						return
 					}
 					logger.Debugf("[discipline][%s] get line from %s: length=%d", fd.ID, f, len(line.Text))
+					fd.tailLinesCount.Incr()
 					if len(line.Text) > 0 {
-						fd.doLine(f, line.Text, ch, logger)
+						if err := fd.doLine(f, line.Text, ch, logger); err != nil {
+							return
+						}
 					}
 				}
 			}
@@ -186,11 +204,11 @@ func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, err
 func (fd *FileDiscipline) Close() error {
 	fd.cancel()
 	fd.wg.Wait()
-	fd.Counter.Stop()
+	fd.Limit.Stop()
 	return nil
 }
 
-func (fd *FileDiscipline) doLine(f, line string, ch *Chan[net.IP], logger Logger) {
+func (fd *FileDiscipline) doLine(f, line string, ch *Chan[net.IP], logger Logger) error {
 	var groups []string
 	for _, re := range fd.regexes {
 		groups = re.FindStringSubmatch(line)
@@ -198,23 +216,29 @@ func (fd *FileDiscipline) doLine(f, line string, ch *Chan[net.IP], logger Logger
 			line = groups[0]
 		} else {
 			logger.Debugf("[discipline][%s] regex not match: %s: length=%d", fd.ID, f, len(line))
-			return
+			return nil
 		}
 	}
 	if len(groups) > fd.ipGroup {
+		fd.matchLineCount.Incr()
 		ip := net.ParseIP(groups[fd.ipGroup])
 		if ip == nil {
-			return
+			fd.badIPLineCount.Incr()
+			return nil
 		}
 		sip := ip.String()
-		if fd.Counter.Add(sip) {
-			if ch.Send(ip) {
-				logger.Errorf("[discipline][%s] arrest: %s", fd.ID, sip)
-			} else {
-				logger.Errorf("[discipline][%s] arrest send interrupt: %s", fd.ID, sip)
+		if fd.Limit.Add(sip) {
+			if err := ch.Send(ip); err != nil {
+				logger.Errorf("[discipline][%s] arrest send fail: %s %v", fd.ID, sip, err)
+				fd.sendJailFailCount.Incr()
+				return err
 			}
+			fd.sendJailSuccessCount.Incr()
+			logger.Infof("[discipline][%s] arrest: %s", fd.ID, sip)
 		} else {
+			fd.watchIPCount.Incr()
 			logger.Infof("[discipline][%s] watch-on: %s", fd.ID, sip)
 		}
 	}
+	return nil
 }

@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/goccy/go-yaml"
@@ -100,7 +103,7 @@ type counterStats struct {
 	expiration time.Time
 }
 
-type Counter struct {
+type Limiter struct {
 	max     int
 	timeout time.Duration
 	sync.Once
@@ -111,7 +114,7 @@ type Counter struct {
 	mp     map[string]*counterStats
 }
 
-func (c *Counter) UnmarshalYAML(b []byte) error {
+func (c *Limiter) UnmarshalYAML(b []byte) error {
 	var s string
 	if err := yaml.Unmarshal(b, &s); err != nil {
 		return err
@@ -137,7 +140,7 @@ func (c *Counter) UnmarshalYAML(b []byte) error {
 	return nil
 }
 
-func (c *Counter) startBackground() {
+func (c *Limiter) startBackground() {
 	c.wg.Add(1)
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 	go func() {
@@ -162,7 +165,7 @@ func (c *Counter) startBackground() {
 	}()
 }
 
-func (c *Counter) Add(s string) bool {
+func (c *Limiter) Add(s string) bool {
 	if c.timeout == 0 {
 		c.timeout = time.Second
 	}
@@ -184,7 +187,7 @@ func (c *Counter) Add(s string) bool {
 	return v.n >= c.max
 }
 
-func (c *Counter) Stop() {
+func (c *Limiter) Stop() {
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -262,16 +265,17 @@ func (c *Chan[T]) Close() {
 	})
 }
 
-func (c *Chan[T]) Send(v T) (ok bool) {
+func (c *Chan[T]) Send(v T) (err error) {
 	if c.closed {
-		return false
+		return errors.New("send to closed channel")
 	}
 	defer func() {
-		recover()
-		ok = false
+		if e := recover(); e != nil {
+			err = fmt.Errorf("send panic: %v", e)
+		}
 	}()
 	c.ch <- v
-	return true
+	return nil
 }
 
 func (c *Chan[T]) Reader() <-chan T {
@@ -298,4 +302,59 @@ func (c *Cleaner) Clean() {
 
 func (c *Cleaner) Len() int {
 	return len(c.cleans)
+}
+
+type Counter struct {
+	name string
+	n    atomic.Int64
+}
+
+func NewCounter(name string) *Counter {
+	return &Counter{
+		name: name,
+	}
+}
+
+func (c *Counter) Incr() {
+	c.n.Add(1)
+}
+
+func (c *Counter) Value() int64 {
+	return c.n.Load()
+}
+
+func (c *Counter) Name() string {
+	return c.name
+}
+
+var counters sync.Map
+
+func RegisterCounter(c *Counter) {
+	counters.Store(c.Name(), c)
+}
+
+func RegisterNewCounter(name string) *Counter {
+	c := NewCounter(name)
+	RegisterCounter(c)
+	return c
+}
+
+func OutputCounters(w io.Writer) error {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	data := map[string]int64{}
+	counters.Range(func(k, v any) bool {
+		c := v.(*Counter)
+		data[c.Name()] = c.Value()
+		return true
+	})
+	return enc.Encode(data)
+}
+
+func randomString(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = 'a' + byte(rand.Intn(26))
+	}
+	return string(b)
 }

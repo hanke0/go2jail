@@ -4,13 +4,44 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"slices"
 	"sync"
 )
 
-func Start(cfg *Config, logger Logger, test string) (stop, wait func(), err error) {
+func Start(cfg *Config, logger Logger, test string, statListen string) (stop, wait func(), err error) {
 	var cleaner Cleaner
 	ctx, cancel := context.WithCancel(context.Background())
+	if statListen != "" {
+		server := http.Server{
+			Addr: statListen,
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					http.NotFound(w, r)
+					return
+				}
+				if r.URL.Path != "/" {
+					http.NotFound(w, r)
+					return
+				}
+				OutputCounters(w)
+			}),
+		}
+		go func() {
+			if err = server.ListenAndServe(); err != nil {
+				logger.Errorf("http stats start fail: %v", err)
+			}
+		}()
+		cleaner.Push(func() {
+			server.Close()
+		})
+		old := cancel
+		cancel = func() {
+			old()
+			server.Close()
+		}
+	}
+
 	for _, v := range cfg.Discipline {
 		var (
 			jails     []*Jail
@@ -22,11 +53,7 @@ func Start(cfg *Config, logger Logger, test string) (stop, wait func(), err erro
 				continue
 			}
 			jailNames = nil
-			e, _ := NewEchoJail(nil)
-			jails = append(jails, &Jail{
-				BaseJail: BaseJail{ID: "test-config", Type: "echo"},
-				Action:   e,
-			})
+			jails = []*Jail{testDisciplineJail}
 		}
 		for _, j := range jailNames {
 			idx := slices.IndexFunc(cfg.Jail, func(e *Jail) bool {
@@ -106,8 +133,15 @@ func jailIp(js []*Jail, ip net.IP, log Logger) {
 		err := j.Action.Arrest(ip, log)
 		if err != nil {
 			log.Errorf("[engine][jail][%s] arrest %s fail: %v", j.ID, ip, err)
+			CountArrestFail.Incr()
 		} else {
 			log.Infof("[engine][jail][%s] arrest %s success", j.ID, ip)
+			CountArrestSuccess.Incr()
 		}
 	}
 }
+
+var (
+	CountArrestSuccess = RegisterNewCounter("total_arrest_success")
+	CountArrestFail    = RegisterNewCounter("total_arrest_fail")
+)

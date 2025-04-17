@@ -76,7 +76,7 @@ discipline:
 
 	flags := Flags{
 		ConfigDir: dir,
-		LogLevel:  LevelDebug,
+		LogLevel:  "debug",
 	}
 	wait, stop, err := entry(&flags)
 	require.NoError(t, err)
@@ -134,7 +134,7 @@ discipline:
 	Stdout = &bs
 	flags := Flags{
 		ConfigDir:      dir,
-		LogLevel:       LevelDebug,
+		LogLevel:       "debug",
 		TestDiscipline: "test",
 	}
 	wait, _, err := entry(&flags)
@@ -160,7 +160,7 @@ discipline:
 `)
 	flags := Flags{
 		ConfigDir: dir,
-		LogLevel:  LevelDebug,
+		LogLevel:  "debug",
 	}
 	wait, stop, err := entry(&flags)
 	require.NoError(t, err)
@@ -180,7 +180,7 @@ discipline:
 `)
 	flags = Flags{
 		ConfigDir: dir,
-		LogLevel:  LevelDebug,
+		LogLevel:  "debug",
 	}
 	wait, stop, err = entry(&flags)
 	require.Error(t, err)

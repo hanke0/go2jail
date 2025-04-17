@@ -8,17 +8,19 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
 
 type Flags struct {
-	LogLevel       int
-	LogFile        string
-	ConfigDir      string
-	TestDiscipline string
-	TestConfig     bool
-	Version        bool
+	LogLevel            string
+	LogFile             string
+	ConfigDir           string
+	TestDiscipline      string
+	TestConfig          bool
+	Version             bool
+	HTTPStatsListenAddr string
 }
 
 var flags Flags
@@ -29,7 +31,8 @@ func init() {
 	flag.StringVar(&flags.TestDiscipline, "test-discipline", "", "test discipline id")
 	flag.BoolVar(&flags.TestConfig, "test-config", false, "test config file")
 	flag.BoolVar(&flags.Version, "version", false, "show version")
-	flag.IntVar(&flags.LogLevel, "log-level", LevelWarning, "log level, set debug to error[0,4]")
+	flag.StringVar(&flags.LogLevel, "log-level", "info", "log level, debug,info,warning,error")
+	flag.StringVar(&flags.HTTPStatsListenAddr, "http-stats-listen-addr", "", "http stats listen address")
 }
 
 var (
@@ -68,17 +71,36 @@ var (
 	Stderr io.Writer = os.Stderr
 )
 
+func parseLevel(s string) (int, error) {
+	switch s {
+	case "debug":
+		return LevelDebug, nil
+	case "info":
+		return LevelInfo, nil
+	case "warning":
+		return LevelWarning, nil
+	case "error":
+		return LevelError, nil
+	default:
+		return strconv.Atoi(s)
+	}
+}
+
 func entry(flags *Flags) (wait, stop func(), err error) {
 	var (
 		logger  Logger
 		cleaner Cleaner
 	)
+	level, err := parseLevel(flags.LogLevel)
+	if err != nil {
+		return nil, nil, fmt.Errorf("bad log level: %w", err)
+	}
 
 	switch flags.LogFile {
 	case "stdout", "-":
-		logger = NewLogger(flags.LogLevel, Stdout)
+		logger = NewLogger(level, Stdout)
 	case "stderr", "":
-		logger = NewLogger(flags.LogLevel, Stderr)
+		logger = NewLogger(level, Stderr)
 	default:
 		f, err := os.OpenFile(flags.LogFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0640)
 		if err != nil {
@@ -87,7 +109,7 @@ func entry(flags *Flags) (wait, stop func(), err error) {
 		cleaner.Push(func() {
 			f.Close()
 		})
-		logger = NewLogger(flags.LogLevel, f)
+		logger = NewLogger(level, f)
 	}
 
 	entries, err := os.ReadDir(flags.ConfigDir)
@@ -117,7 +139,7 @@ func entry(flags *Flags) (wait, stop func(), err error) {
 		cleaner.Clean()
 		return nothing, nothing, nil
 	}
-	stop, wait, err1 := Start(cfg, logger, flags.TestDiscipline)
+	stop, wait, err1 := Start(cfg, logger, flags.TestDiscipline, flags.HTTPStatsListenAddr)
 	if err1 != nil {
 		cleaner.Clean()
 		return nil, nil, err1
