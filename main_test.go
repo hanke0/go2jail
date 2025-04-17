@@ -67,7 +67,7 @@ discipline:
     jail: [nft]
     files: [{{.dir}}/test.log]
     regexes: ['%(ip)']
-    counter: 1/1s
+    limit: 1/1s
 `)
 	watchfile := filepath.Join(dir, "test.log")
 	err := os.WriteFile(watchfile, nil, 0777)
@@ -120,7 +120,7 @@ discipline:
     jail: [log]
     files: [{{.dir}}/test.log]
     regexes: ['%(ip)']
-    counter: 1/s
+    limit: 1/s
 `)
 	watchfile := filepath.Join(dir, "test.log")
 	err := os.WriteFile(watchfile, []byte("1.1.1.1\n2.2.2.2\n"), 0777)

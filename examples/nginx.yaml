@@ -15,7 +15,7 @@ discipline:
   - id: nginx
     jail: ['nft']
     source: log
-    counter: 3/60m
+    limit: 3/60m
     files:
       - /var/log/nginx/access.log
     regexes:

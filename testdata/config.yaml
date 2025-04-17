@@ -15,7 +15,7 @@ discipline:
   - id: test
     jail: ['nft']
     source: log
-    counter: 10/5m
+    limit: 10/5m
     files:
       - ./test.log
     regexes:

@@ -121,11 +121,11 @@ func (c *Limiter) UnmarshalYAML(b []byte) error {
 	}
 	parts := strings.Split(s, "/")
 	if len(parts) != 2 {
-		return fmt.Errorf("bad counter: %s", s)
+		return fmt.Errorf("bad limit: %s", s)
 	}
 	max, err := strconv.Atoi(strings.TrimSpace(parts[0]))
 	if err != nil {
-		return fmt.Errorf("bad counter: %s", s)
+		return fmt.Errorf("bad limit: %s", s)
 	}
 	d := strings.TrimSpace(parts[1])
 	if !strings.ContainsAny(d, "0123456789") {
@@ -133,7 +133,7 @@ func (c *Limiter) UnmarshalYAML(b []byte) error {
 	}
 	timeout, err := time.ParseDuration(d)
 	if err != nil {
-		return fmt.Errorf("bad counter: %s", s)
+		return fmt.Errorf("bad limit: %s", s)
 	}
 	c.max = max
 	c.timeout = timeout

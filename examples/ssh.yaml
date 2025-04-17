@@ -15,7 +15,7 @@ discipline:
   - id: sshd
     jail: ['nft']
     source: log
-    counter: 5/10m
+    limit: 5/10m
     files:
       - /var/log/auth.log
     regexes:
