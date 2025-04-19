@@ -146,6 +146,7 @@ func (c *Limiter) startBackground() {
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 	go func() {
 		tick := time.NewTicker(c.timeout)
+		defer tick.Stop()
 		for {
 			select {
 			case <-c.ctx.Done():
@@ -166,7 +167,7 @@ func (c *Limiter) startBackground() {
 	}()
 }
 
-func (c *Limiter) Add(s string) bool {
+func (c *Limiter) Add(s string) (string, bool) {
 	if c.timeout == 0 {
 		c.timeout = time.Second
 	}
@@ -185,7 +186,11 @@ func (c *Limiter) Add(s string) bool {
 		c.mp[s] = v
 	}
 	v.n++
-	return v.n >= c.max
+	ts := strings.Replace(c.timeout.String(), "0s", "", -1)
+	if v.n >= c.max {
+		return fmt.Sprintf("%d/%s>=%d/%s", v.n, ts, c.max, c.timeout), true
+	}
+	return fmt.Sprintf("%d/%s<%d/%s", v.n, ts, c.max, c.timeout), false
 }
 
 func (c *Limiter) Stop() {

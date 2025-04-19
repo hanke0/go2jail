@@ -143,7 +143,7 @@ discipline:
     jail: [nft]
     files: [{{.dir}}/test.log]
     matches: ['%(ip)']
-    rate: 2/m
+    rate: 2/10m
 `
 	lines := `1.1.1.1
 1.1.1.1

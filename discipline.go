@@ -186,17 +186,17 @@ func (fd *FileDiscipline) doLine(f, line string, ch *Chan[net.IP], logger Logger
 		return nil
 	}
 	sip := ip.String()
-	if fd.Rate.Add(sip) {
+	if desc, ok := fd.Rate.Add(sip); ok {
 		if err := ch.Send(ip); err != nil {
 			logger.Errorf("[discipline][%s] arrest send fail: %s %v", fd.ID, sip, err)
 			fd.sendJailFailCount.Incr()
 			return err
 		}
 		fd.sendJailSuccessCount.Incr()
-		logger.Infof("[discipline][%s] arrest: %s", fd.ID, sip)
+		logger.Infof("[discipline][%s] arrest(%s): %s", fd.ID, desc, sip)
 	} else {
 		fd.watchIPCount.Incr()
-		logger.Infof("[discipline][%s] watch-on: %s", fd.ID, sip)
+		logger.Infof("[discipline][%s] watch-on(%s): %s", fd.ID, desc, sip)
 	}
 	return nil
 }
