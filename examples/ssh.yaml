@@ -13,10 +13,10 @@ jail:
 
 discipline:
   - id: sshd
+    type: log
     jail: ['nft']
-    source: log
     rate: 5/10m
     files:
       - /var/log/auth.log
-    match:
+    matches:
       - authentication\s+failure.+?rhost=%(ip)

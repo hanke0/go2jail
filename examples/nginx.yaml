@@ -13,8 +13,8 @@ jail:
 
 discipline:
   - id: nginx
+    type: log
     jail: ['nft']
-    source: log
     rate: 3/60m
     files:
       - /var/log/nginx/access.log

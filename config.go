@@ -14,8 +14,8 @@ type BaseJail struct {
 }
 
 type Jail struct {
-	BaseJail
-	Action Jailer `yaml:"-"`
+	BaseJail `yaml:",inline"`
+	Action   Jailer `yaml:",inline"`
 }
 
 func (j *Jail) UnmarshalYAML(b []byte) error {
@@ -35,23 +35,23 @@ func (j *Jail) UnmarshalYAML(b []byte) error {
 }
 
 type BaseDiscipline struct {
-	ID     string   `yaml:"id"`
-	Jail   []string `yaml:"jail"`
-	Source string   `yaml:"source"`
+	ID   string   `yaml:"id"`
+	Type string   `yaml:"type"`
+	Jail []string `yaml:"jail"`
 }
 
 type Discipline struct {
-	BaseDiscipline
-	Action Discipliner `yaml:"-"`
+	BaseDiscipline `yaml:",inline"`
+	Action         Discipliner `yaml:",inline"`
 }
 
 func (j *Discipline) UnmarshalYAML(b []byte) error {
 	if err := yaml.Unmarshal(b, &j.BaseDiscipline); err != nil {
 		return err
 	}
-	builder := disciplineProviders[j.Source]
+	builder := disciplineProviders[j.Type]
 	if builder == nil {
-		return fmt.Errorf("unknown discipline source: %s", j.Source)
+		return fmt.Errorf("unknown discipline type: %s", j.Type)
 	}
 	p, err := builder(b)
 	if err != nil {
@@ -115,6 +115,10 @@ type Config struct {
 	Jail       []*Jail       `yaml:"jail"`
 	Allow      []ipCidr      `yaml:"allow"`
 	Discipline []*Discipline `yaml:"discipline"`
+}
+
+func (c *Config) String() string {
+	return YamlEncode(c)
 }
 
 func (c *Config) AllowIP(ip net.IP) bool {

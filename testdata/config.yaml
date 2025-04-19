@@ -13,8 +13,8 @@ allow:
 
 discipline:
   - id: test
+    type: log
     jail: ['nft']
-    source: log
     rate: 10/5m
     files:
       - ./test.log

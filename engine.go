@@ -10,6 +10,7 @@ import (
 )
 
 func Start(cfg *Config, logger Logger, test string, statListen string) (stop, wait func(), err error) {
+	logger.Debugf("starting with config: %s", cfg)
 	var cleaner Cleaner
 	ctx, cancel := context.WithCancel(context.Background())
 	if statListen != "" {

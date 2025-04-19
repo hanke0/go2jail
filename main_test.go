@@ -112,7 +112,7 @@ jail:
     ipv6_set: ipv6_block_set # nft set name for ipv6
 discipline:
   - id: test
-    source: log
+    type: log
     jail: [nft]
     files: [{{.dir}}/test.log]
     matches: '%(ip)'
@@ -139,7 +139,7 @@ jail:
     ipv6_set: ipv6_block_set # nft set name for ipv6
 discipline:
   - id: test
-    source: log
+    type: log
     jail: [nft]
     files: [{{.dir}}/test.log]
     matches: ['%(ip)']
@@ -166,7 +166,7 @@ jail:
     ipv6_set: ipv6_block_set # nft set name for ipv6
 discipline:
   - id: test
-    source: log
+    type: log
     jail: [nft]
     files: [{{.dir}}/test.log]
     matches: ['%(ip)']
@@ -188,7 +188,7 @@ jail:
     type: log
 discipline:
   - id: test
-    source: log
+    type: log
     jail: [log]
     files: [{{.dir}}/test.log]
     matches: ['%(ip)']
@@ -224,7 +224,7 @@ jail:
     type: echo
 discipline:
   - id: test
-    source: log
+    type: log
     jail: [test]
     files: [{{.dir}}/absent.txt]
     matches: ['%(ip)']
@@ -245,7 +245,7 @@ jail:
     type: echo
 discipline:
   - id: test
-    source: log
+    type: log
     jail: [test]
     files: [{{.dir}}/absent.txt]
     matches: ['%(ip)']

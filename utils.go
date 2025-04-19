@@ -107,12 +107,21 @@ type counterStats struct {
 type Limiter struct {
 	max     int
 	timeout time.Duration
-	sync.Once
-	mu     sync.Mutex
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel func()
-	mp     map[string]*counterStats
+	mu      sync.Mutex
+	wg      sync.WaitGroup
+	mp      map[string]*counterStats
+	cancel  func()
+}
+
+func (c *Limiter) String() string {
+	if c == nil {
+		return "1/s"
+	}
+	return fmt.Sprintf("%d/%s", c.max, c.timeout)
+}
+
+func (c *Limiter) MarshalYAML() (any, error) {
+	return c.String(), nil
 }
 
 func (c *Limiter) UnmarshalYAML(b []byte) error {
@@ -142,14 +151,15 @@ func (c *Limiter) UnmarshalYAML(b []byte) error {
 }
 
 func (c *Limiter) startBackground() {
+	ctx, cancel := context.WithCancel(context.Background())
+	c.cancel = cancel
 	c.wg.Add(1)
-	c.ctx, c.cancel = context.WithCancel(context.Background())
 	go func() {
 		tick := time.NewTicker(c.timeout)
 		defer tick.Stop()
 		for {
 			select {
-			case <-c.ctx.Done():
+			case <-ctx.Done():
 				tick.Stop()
 				c.wg.Done()
 				return
@@ -168,12 +178,17 @@ func (c *Limiter) startBackground() {
 }
 
 func (c *Limiter) Add(s string) (string, bool) {
+	if c == nil {
+		return "1/s", true
+	}
 	if c.timeout == 0 {
 		c.timeout = time.Second
 	}
-	c.Once.Do(c.startBackground)
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.cancel == nil {
+		c.startBackground()
+	}
 	if c.mp == nil {
 		c.mp = map[string]*counterStats{}
 	}
@@ -194,6 +209,9 @@ func (c *Limiter) Add(s string) (string, bool) {
 }
 
 func (c *Limiter) Stop() {
+	if c == nil {
+		return
+	}
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -395,6 +413,14 @@ var (
 	)
 )
 
+func (m *Matcher) MarshalYAML() (any, error) {
+	var s []string
+	for _, r := range m.regexes {
+		s = append(s, r.String())
+	}
+	return s, nil
+}
+
 func (m *Matcher) UnmarshalYAML(b []byte) error {
 	var reList []string
 	if err := yaml.Unmarshal(b, &reList); err != nil {
@@ -414,6 +440,10 @@ func (m *Matcher) UnmarshalYAML(b []byte) error {
 	return nil
 }
 
+func (m *Matcher) Test(s string) bool {
+	return len(m.Match(s)) > 0
+}
+
 func (m *Matcher) Match(s string) []string {
 	for _, r := range m.regexes {
 		match := r.FindStringSubmatch(s)
@@ -429,4 +459,13 @@ func (m *Matcher) Match(s string) []string {
 		}
 	}
 	return nil
+}
+
+func YamlEncode(v any) string {
+	b, _ := yaml.MarshalWithOptions(v,
+		yaml.IndentSequence(true),
+		yaml.UseSingleQuote(true),
+		yaml.WithSmartAnchor(),
+	)
+	return string(b)
 }

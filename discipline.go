@@ -22,9 +22,9 @@ func init() {
 type FileDiscipline struct {
 	ID                    string   `yaml:"id"`
 	Files                 []string `yaml:"files"`
-	Matches               Matcher  `yaml:"matches"`
-	Ignores               Matcher  `yaml:"ignores"`
-	Rate                  Limiter  `yaml:"rate"`
+	Matches               *Matcher `yaml:"matches,omitempty"`
+	Ignores               *Matcher `yaml:"ignores,omitempty"`
+	Rate                  *Limiter `yaml:"rate,omitempty"`
 	SkipWhenFileNotExists bool     `yaml:"skip_when_file_not_exists"`
 	ctx                   context.Context
 	cancel                func()
@@ -44,8 +44,11 @@ func NewFileDiscipline(b []byte) (Discipliner, error) {
 	if err := yaml.Unmarshal(b, &f); err != nil {
 		return nil, err
 	}
+	if f.Matches == nil {
+		return nil, fmt.Errorf("[discipline][%s] matches is nil", f.ID)
+	}
 	if err := f.Matches.ExpectGroups("ip"); err != nil {
-		return nil, fmt.Errorf("bad matches: %w", err)
+		return nil, fmt.Errorf("[discipline][%s] matches: %w", f.ID, err)
 	}
 
 	f.ctx, f.cancel = context.WithCancel(context.Background())
@@ -104,6 +107,7 @@ func (fd *FileDiscipline) Test(logger Logger) (<-chan net.IP, error) {
 }
 
 func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, error) {
+	logger.Infof("[discipline][%s] watch start: rate=%s", fd.ID, fd.Rate.String())
 	ch := NewChan[net.IP](0)
 	fd.addCancel(ch.Close)
 	for _, f := range fd.Files {
@@ -175,7 +179,7 @@ func (fd *FileDiscipline) doLine(f, line string, ch *Chan[net.IP], logger Logger
 		logger.Debugf("[discipline][%s] regex not match: %s: length=%d", fd.ID, f, len(line))
 		return nil
 	}
-	if g := fd.Ignores.Match(line); len(g) != 0 {
+	if fd.Ignores != nil && fd.Ignores.Test(groups[0]) {
 		logger.Debugf("[discipline][%s] regex ignore: %s: length=%d", fd.ID, f, len(line))
 		return nil
 	}
