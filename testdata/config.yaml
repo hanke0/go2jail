@@ -15,8 +15,8 @@ discipline:
   - id: test
     jail: ['nft']
     source: log
-    limit: 10/5m
+    rate: 10/5m
     files:
       - ./test.log
-    regexes:
-      - %(ip)\s+\-\s+"[^"]+"\s+\[[^\]]+\]\s+"[^"]+"\s+"[^"]+"\s+(?<code>401|402|403)\s+
+    matches:
+      - '%(ip)\s+\-\s+"[^"]+"\s+\[[^\]]+\]\s+"[^"]+"\s+"[^"]+"\s+(?<code>401|402|403)\s+'

@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -121,11 +122,11 @@ func (c *Limiter) UnmarshalYAML(b []byte) error {
 	}
 	parts := strings.Split(s, "/")
 	if len(parts) != 2 {
-		return fmt.Errorf("bad limit: %s", s)
+		return fmt.Errorf("bad rate: %s", s)
 	}
 	max, err := strconv.Atoi(strings.TrimSpace(parts[0]))
 	if err != nil {
-		return fmt.Errorf("bad limit: %s", s)
+		return fmt.Errorf("bad rate: %s", s)
 	}
 	d := strings.TrimSpace(parts[1])
 	if !strings.ContainsAny(d, "0123456789") {
@@ -133,7 +134,7 @@ func (c *Limiter) UnmarshalYAML(b []byte) error {
 	}
 	timeout, err := time.ParseDuration(d)
 	if err != nil {
-		return fmt.Errorf("bad limit: %s", s)
+		return fmt.Errorf("bad rate: %s", s)
 	}
 	c.max = max
 	c.timeout = timeout
@@ -357,4 +358,70 @@ func randomString(n int) string {
 		b[i] = 'a' + byte(rand.Intn(26))
 	}
 	return string(b)
+}
+
+type Matcher struct {
+	regexes      []*regexp.Regexp
+	expectGroups []int
+}
+
+func (m *Matcher) ExpectGroups(groups ...string) error {
+	for _, group := range groups {
+		for _, r := range m.regexes {
+			gidx := -1
+			for i, name := range r.SubexpNames() {
+				if name == group {
+					gidx = i
+					break
+				}
+			}
+			if gidx < 0 {
+				return fmt.Errorf("regex group %q must exists", group)
+			}
+			m.expectGroups = append(m.expectGroups, gidx)
+		}
+	}
+	return nil
+}
+
+var (
+	regexReplacer = strings.NewReplacer(
+		"%(ip)", `(?P<ip>(([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4})|([0-9]{1,3}(\.[0-9]{1,3}){3}))`,
+	)
+)
+
+func (m *Matcher) UnmarshalYAML(b []byte) error {
+	var reList []string
+	if err := yaml.Unmarshal(b, &reList); err != nil {
+		var s string
+		if err1 := yaml.Unmarshal(b, &s); err1 != nil {
+			return err
+		}
+		reList = []string{s}
+	}
+	for _, s := range reList {
+		r, err := regexp.Compile(regexReplacer.Replace(s))
+		if err != nil {
+			return err
+		}
+		m.regexes = append(m.regexes, r)
+	}
+	return nil
+}
+
+func (m *Matcher) Match(s string) []string {
+	for _, r := range m.regexes {
+		match := r.FindStringSubmatch(s)
+		if len(match) > 0 {
+			var groups = []string{match[0]}
+			for _, idx := range m.expectGroups {
+				if len(match) <= idx {
+					continue
+				}
+				groups = append(groups, match[idx])
+			}
+			return groups
+		}
+	}
+	return nil
 }

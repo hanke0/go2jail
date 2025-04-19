@@ -5,7 +5,6 @@ go 1.24.1
 require (
 	github.com/goccy/go-yaml v1.17.1
 	github.com/hpcloud/tail v1.0.0
-	github.com/smallnest/ringbuffer v0.0.0-20250317021400-0da97b586904
 	github.com/stretchr/testify v1.10.0
 )
 

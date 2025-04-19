@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,25 +51,10 @@ echo "$@" >>"$dir/nft.log"
 	return filepath.Join(dir, "nft.log")
 }
 
-func TestBasicLogAndNftReject(t *testing.T) {
-	dir := makeTestConfig(t, `
-jail:
-  - id: nft
-    type: nftset
-    sudo: false # run nft command without sudo
-    nft_executable: nft # nft executable path
-    rule: inet # nft rule name
-    table: filter # nft table name
-    ipv4_set: ipv4_block_set # nft set name for ipv4
-    ipv6_set: ipv6_block_set # nft set name for ipv6
-discipline:
-  - id: test
-    source: log
-    jail: [nft]
-    files: [{{.dir}}/test.log]
-    regexes: ['%(ip)']
-    limit: 1/1s
-`)
+func testDisciplineLogAndNftReject(t *testing.T,
+	configContent, LinesContent, expect string) string {
+	t.Helper()
+	dir := makeTestConfig(t, configContent)
 	watchfile := filepath.Join(dir, "test.log")
 	err := os.WriteFile(watchfile, nil, 0777)
 	require.NoError(t, err)
@@ -81,8 +67,13 @@ discipline:
 	wait, stop, err := entry(&flags)
 	require.NoError(t, err)
 
+	script := fmt.Sprintf(`#!/bin/bash
+cat > %s <<'__EOF__'
+%s
+__EOF__
+	`, watchfile, LinesContent)
 	s, err := Execute(ExecuteOptions{
-		Program:    []string{"bash", "-c", "echo -e '1.1.1.1\n2.2.2.2' >" + watchfile},
+		Program:    []string{"bash", "-c", script},
 		OutputSize: 1024,
 	})
 	require.NoError(t, err, s)
@@ -104,9 +95,90 @@ discipline:
 
 	b, err := os.ReadFile(nftlog)
 	require.NoError(t, err)
-	require.Equal(t, `add element inet filter ipv4_block_set { 1.1.1.1 }
+	require.Equal(t, expect, string(b))
+	return dir
+}
+
+func TestBasicLogAndNftReject(t *testing.T) {
+	cfg := `
+jail:
+  - id: nft
+    type: nftset
+    sudo: false # run nft command without sudo
+    nft_executable: nft # nft executable path
+    rule: inet # nft rule name
+    table: filter # nft table name
+    ipv4_set: ipv4_block_set # nft set name for ipv4
+    ipv6_set: ipv6_block_set # nft set name for ipv6
+discipline:
+  - id: test
+    source: log
+    jail: [nft]
+    files: [{{.dir}}/test.log]
+    matches: '%(ip)'
+    rate: 1/1s
+`
+	lines := `1.1.1.1
+2.2.2.2`
+	expect := `add element inet filter ipv4_block_set { 1.1.1.1 }
 add element inet filter ipv4_block_set { 2.2.2.2 }
-`, string(b))
+`
+	testDisciplineLogAndNftReject(t, cfg, lines, expect)
+}
+
+func TestLogDisciplineRateWorks(t *testing.T) {
+	cfg := `
+jail:
+  - id: nft
+    type: nftset
+    sudo: false # run nft command without sudo
+    nft_executable: nft # nft executable path
+    rule: inet # nft rule name
+    table: filter # nft table name
+    ipv4_set: ipv4_block_set # nft set name for ipv4
+    ipv6_set: ipv6_block_set # nft set name for ipv6
+discipline:
+  - id: test
+    source: log
+    jail: [nft]
+    files: [{{.dir}}/test.log]
+    matches: ['%(ip)']
+    rate: 2/m
+`
+	lines := `1.1.1.1
+1.1.1.1
+2.2.2.2`
+	expect := `add element inet filter ipv4_block_set { 1.1.1.1 }
+`
+	testDisciplineLogAndNftReject(t, cfg, lines, expect)
+}
+
+func TestLogDisciplineIgnoreWorks(t *testing.T) {
+	cfg := `
+jail:
+  - id: nft
+    type: nftset
+    sudo: false # run nft command without sudo
+    nft_executable: nft # nft executable path
+    rule: inet # nft rule name
+    table: filter # nft table name
+    ipv4_set: ipv4_block_set # nft set name for ipv4
+    ipv6_set: ipv6_block_set # nft set name for ipv6
+discipline:
+  - id: test
+    source: log
+    jail: [nft]
+    files: [{{.dir}}/test.log]
+    matches: ['%(ip)']
+    ignores: '^1\.'
+    rate: 1/s
+`
+	lines := `1.1.1.1
+1.1.1.1
+2.2.2.2`
+	expect := `add element inet filter ipv4_block_set { 2.2.2.2 }
+`
+	testDisciplineLogAndNftReject(t, cfg, lines, expect)
 }
 
 func TestTestingWorks(t *testing.T) {
@@ -119,8 +191,8 @@ discipline:
     source: log
     jail: [log]
     files: [{{.dir}}/test.log]
-    regexes: ['%(ip)']
-    limit: 1/s
+    matches: ['%(ip)']
+    rate: 1/s
 `)
 	watchfile := filepath.Join(dir, "test.log")
 	err := os.WriteFile(watchfile, []byte("1.1.1.1\n2.2.2.2\n"), 0777)
@@ -155,7 +227,7 @@ discipline:
     source: log
     jail: [test]
     files: [{{.dir}}/absent.txt]
-    regexes: ['%(ip)']
+    matches: ['%(ip)']
     skip_when_file_not_exists: true
 `)
 	flags := Flags{
@@ -176,7 +248,7 @@ discipline:
     source: log
     jail: [test]
     files: [{{.dir}}/absent.txt]
-    regexes: ['%(ip)']
+    matches: ['%(ip)']
 `)
 	flags = Flags{
 		ConfigDir: dir,
