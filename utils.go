@@ -117,7 +117,7 @@ func (c *Limiter) String() string {
 	if c == nil {
 		return "1/s"
 	}
-	return fmt.Sprintf("%d/%s", c.max, c.timeout)
+	return fmt.Sprintf("%d/%s", c.max, formatDuration(c.timeout))
 }
 
 func (c *Limiter) MarshalYAML() (any, error) {
@@ -142,7 +142,7 @@ func (c *Limiter) UnmarshalYAML(b []byte) error {
 		d = "1" + d
 	}
 	timeout, err := time.ParseDuration(d)
-	if err != nil {
+	if err != nil || timeout < time.Millisecond {
 		return fmt.Errorf("bad rate: %s", s)
 	}
 	c.max = max
@@ -201,11 +201,41 @@ func (c *Limiter) Add(s string) (string, bool) {
 		c.mp[s] = v
 	}
 	v.n++
-	ts := strings.Replace(c.timeout.String(), "0s", "", -1)
+	ts := formatDuration(c.timeout)
 	if v.n >= c.max {
-		return fmt.Sprintf("%d/%s>=%d/%s", v.n, ts, c.max, c.timeout), true
+		return fmt.Sprintf("%d/%s>=%d/%s", v.n, ts, c.max, ts), true
 	}
-	return fmt.Sprintf("%d/%s<%d/%s", v.n, ts, c.max, c.timeout), false
+	return fmt.Sprintf("%d/%s<%d/%s", v.n, ts, c.max, ts), false
+}
+
+func formatDuration(d time.Duration) string {
+	if d.Seconds() < 0 {
+		m := d.Milliseconds()
+		return fmt.Sprintf("%dms", m)
+	}
+	if d == time.Second {
+		return "s"
+	}
+	if d == time.Millisecond {
+		return "ms"
+	}
+	if d == time.Minute {
+		return "m"
+	}
+	if d == time.Hour {
+		return "h"
+	}
+	if d == time.Hour*24 {
+		return "d"
+	}
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		return s[:len(s)-2]
+	}
+	if strings.HasSuffix(s, "h0m0s") {
+		return s[:len(s)-4]
+	}
+	return s
 }
 
 func (c *Limiter) Stop() {
