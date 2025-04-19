@@ -155,7 +155,7 @@ func (c *Limiter) startBackground() {
 	c.cancel = cancel
 	c.wg.Add(1)
 	go func() {
-		tick := time.NewTicker(c.timeout)
+		tick := time.NewTicker(time.Second * 10)
 		defer tick.Stop()
 		for {
 			select {
