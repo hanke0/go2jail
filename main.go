@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -21,9 +23,26 @@ type Flags struct {
 	TestConfig          bool
 	Version             bool
 	HTTPStatsListenAddr string
+
+	TestRegexMatch  Multi
+	TestRegexIgnore Multi
+	TestRegexFile   string
 }
 
 var flags Flags
+
+type Multi struct {
+	Values []string
+}
+
+func (m *Multi) String() string {
+	return ""
+}
+
+func (m *Multi) Set(value string) error {
+	m.Values = append(m.Values, value)
+	return nil
+}
 
 func init() {
 	flag.StringVar(&flags.LogFile, "log-file", "stderr", "log file definition. support special value: stdout(or -), stderr")
@@ -33,6 +52,9 @@ func init() {
 	flag.BoolVar(&flags.Version, "version", false, "show version")
 	flag.StringVar(&flags.LogLevel, "log-level", "info", "log level, debug,info,warning,error")
 	flag.StringVar(&flags.HTTPStatsListenAddr, "http-stats-listen-addr", "", "http stats listen address")
+	flag.Var(&flags.TestRegexMatch, "test-regex-match", "test regex match")
+	flag.Var(&flags.TestRegexIgnore, "test-regex-ignore", "test regex match")
+	flag.StringVar(&flags.TestRegexFile, "test-regex-file", "", "test regex file")
 }
 
 var (
@@ -50,6 +72,10 @@ func main() {
 	flag.Parse()
 	if flags.Version {
 		printVersion()
+		return
+	}
+	if flags.TestRegexFile != "" {
+		testRegexes()
 		return
 	}
 	wait, stop, err := entry(&flags)
@@ -149,3 +175,51 @@ func entry(flags *Flags) (wait, stop func(), err error) {
 }
 
 func nothing() {}
+
+func testRegexes() {
+	f, err := os.Open(flags.TestRegexFile)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	defer f.Close()
+
+	b, _ := json.Marshal(flags.TestRegexMatch.Values)
+	var (
+		match   Matcher
+		ignores Matcher
+	)
+	if err := match.UnmarshalYAML(b); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	if err := match.ExpectGroups("ip"); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	if flags.TestRegexIgnore.Values != nil {
+		b, _ := json.Marshal(flags.TestRegexIgnore.Values)
+		if err := ignores.UnmarshalYAML(b); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}
+
+	fmt.Println(match.MarshalYAML())
+	fmt.Println(ignores.MarshalYAML())
+
+	scan := bufio.NewScanner(f)
+	for scan.Scan() {
+		line := scan.Text()
+		g := match.Match(line)
+		if len(g) > 0 && !ignores.Test(line) {
+			fmt.Println("MATCH:"+g[1], "\tLine:", line)
+		} else {
+			fmt.Println("MISS:\tLine:", line)
+		}
+	}
+	if scan.Err() != nil {
+		fmt.Println(scan.Err())
+		os.Exit(1)
+	}
+}
