@@ -51,7 +51,7 @@ func (f *CommonDiscipline) Init(id string) error {
 	return nil
 }
 
-func (fd *CommonDiscipline) doLine(prefix, line string, ch *Chan[net.IP], logger Logger) error {
+func (fd *CommonDiscipline) doLine(prefix, line string, ch *Chan[BadLog], logger Logger) error {
 	fd.tailLinesCount.Incr()
 	if line == "" || fd.Matches == nil {
 		return nil
@@ -74,7 +74,10 @@ func (fd *CommonDiscipline) doLine(prefix, line string, ch *Chan[net.IP], logger
 	}
 	sip := ip.String()
 	if desc, ok := fd.Rate.Add(sip); ok {
-		if err := ch.Send(ip); err != nil {
+		if err := ch.Send(BadLog{
+			IP:   ip,
+			Line: line,
+		}); err != nil {
 			logger.Errorf("[discipline][%s] arrest send fail: %s %v", prefix, sip, err)
 			fd.sendJailFailCount.Incr()
 			return err
@@ -147,17 +150,17 @@ func (fd *FileDiscipline) tail(f string, testing bool) (t *tail.Tail, err error)
 	return
 }
 
-func (fd *FileDiscipline) Watch(logger Logger) (<-chan net.IP, error) {
+func (fd *FileDiscipline) Watch(logger Logger) (<-chan BadLog, error) {
 	return fd.watch(logger, false)
 }
 
-func (fd *FileDiscipline) Test(logger Logger) (<-chan net.IP, error) {
+func (fd *FileDiscipline) Test(logger Logger) (<-chan BadLog, error) {
 	return fd.watch(logger, true)
 }
 
-func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, error) {
+func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan BadLog, error) {
 	logger.Infof("[discipline][%s] watch start: rate=%s", fd.ID, fd.Rate.String())
-	ch := NewChan[net.IP](0)
+	ch := NewChan[BadLog](0)
 	fd.cancel.Prepend(ch.Close)
 	for _, f := range fd.Files {
 		if fd.SkipWhenFileNotExists {
@@ -249,13 +252,13 @@ func NewShellDiscipline(b []byte) (Discipliner, error) {
 	return &s, nil
 }
 
-func (sd *ShellDiscipline) Test(logger Logger) (<-chan net.IP, error) {
+func (sd *ShellDiscipline) Test(logger Logger) (<-chan BadLog, error) {
 	v, err := sd.Watch(logger)
 	sd.RestartPolicy.Stop()
 	return v, err
 }
 
-func (sd *ShellDiscipline) Watch(logger Logger) (<-chan net.IP, error) {
+func (sd *ShellDiscipline) Watch(logger Logger) (<-chan BadLog, error) {
 	logger.Infof("[discipline][%s] watch starting", sd.ID)
 	sd.RestartPolicy.Next(nil)
 	cmd, cancel, err := sd.execute(logger)
@@ -292,7 +295,7 @@ func (sd *ShellDiscipline) Watch(logger Logger) (<-chan net.IP, error) {
 		}
 		logger.Infof("[discipline][%s] exec exit by restart_policy: exiterr=%v", sd.ID, exeErr)
 	}()
-	ch := NewChan[net.IP](0)
+	ch := NewChan[BadLog](0)
 	sd.wg.Add(1)
 	go func() {
 		defer func() {

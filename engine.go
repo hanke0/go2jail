@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"slices"
 	"sync"
@@ -87,7 +86,7 @@ func runDiscipline(ctx context.Context,
 	cfg *Config, d *Discipline, js []*Jail,
 	log Logger, test bool) (func(), error) {
 	var (
-		ch  <-chan net.IP
+		ch  <-chan BadLog
 		err error
 	)
 	if test {
@@ -110,33 +109,35 @@ func runDiscipline(ctx context.Context,
 					log.Errorf("[engine][discipline][%s] close discipline fail: %v", d.ID, err)
 				}
 				return
-			case ip, ok := <-ch:
+			case badlog, ok := <-ch:
 				if !ok {
 					log.Debugf("[engine][discipline][%s] watch channel close", d.ID)
 					return
 				}
+				ip := badlog.IP
 				if cfg.AllowIP(ip) ||
 					ip.IsLoopback() || ip.IsUnspecified() ||
 					ip.IsMulticast() {
 					log.Debugf("[engine][discipline][%s] ip is in allow list: %s", d.ID, ip)
 					continue
 				}
-				jailIp(js, ip, log)
+				jailIp(js, badlog, log)
 			}
 		}
 	}()
 	return wg.Wait, nil
 }
 
-func jailIp(js []*Jail, ip net.IP, log Logger) {
+func jailIp(js []*Jail, badlog BadLog, log Logger) {
+	ip := badlog.IP
 	for _, j := range js {
-		log.Debugf("[engine][jail][%s] start arrest %s", j.ID, ip)
-		err := j.Action.Arrest(ip, log)
+		log.Debugf("[engine][jail][%s] start arrest %s by line: %s", j.ID, ip, badlog.Line)
+		err := j.Action.Arrest(badlog, log)
 		if err != nil {
-			log.Errorf("[engine][jail][%s] arrest %s fail: %v", j.ID, ip, err)
+			log.Errorf("[engine][jail][%s] arrest %s fail: %v: line=%s", j.ID, ip, err, badlog.Line)
 			CountArrestFail.Incr()
 		} else {
-			log.Infof("[engine][jail][%s] arrest %s success", j.ID, ip)
+			log.Infof("[engine][jail][%s] arrest %s success, line=%s", j.ID, ip, badlog.Line)
 			CountArrestSuccess.Incr()
 		}
 	}

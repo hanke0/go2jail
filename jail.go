@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 	"os/exec"
 	"time"
 
@@ -52,10 +51,11 @@ func NewNftJail(b []byte) (Jailer, error) {
 	return &j, nil
 }
 
-func (nj *NftJail) Arrest(ip net.IP, log Logger) error {
+func (nj *NftJail) Arrest(bad BadLog, log Logger) error {
 	var (
 		s   string
 		set string
+		ip  = bad.IP
 	)
 	if ip.To4() != nil {
 		s = ip.To4().String()
@@ -129,8 +129,8 @@ type: echo`))
 	testDisciplineJail = &j
 }
 
-func (ej *EchoJail) Arrest(ip net.IP, log Logger) error {
-	fmt.Fprintln(Stdout, ip.String())
+func (ej *EchoJail) Arrest(ip BadLog, log Logger) error {
+	fmt.Fprintln(Stdout, ip.IP.String(), ip.Line)
 	ej.jailSuccessCounter.Incr()
 	return nil
 }
@@ -158,8 +158,8 @@ func NewLogJail(b []byte) (Jailer, error) {
 	return &j, nil
 }
 
-func (ej *LogJail) Arrest(ip net.IP, log Logger) error {
-	log.Errorf("[jail-echo][%s] arrest ip %s", ej.ID, ip)
+func (ej *LogJail) Arrest(ip BadLog, log Logger) error {
+	log.Errorf("[jail-echo][%s] arrest ip %s by line: %s", ej.ID, ip, ip.Line)
 	ej.jailSuccessCounter.Incr()
 	return nil
 }
@@ -193,8 +193,8 @@ func NewShellJail(b []byte) (Jailer, error) {
 	return &j, nil
 }
 
-func (sj *ShellJail) Arrest(ip net.IP, log Logger) error {
-	c, err := RunScript(sj.Run, &sj.ScriptOption, ip.String())
+func (sj *ShellJail) Arrest(ip BadLog, log Logger) error {
+	c, err := RunScript(sj.Run, &sj.ScriptOption, ip.IP.String(), ip.Line)
 	if err != nil {
 		log.Errorf("[jail-shell][%s] arrest ip %s fail: %v, %s", sj.ID, ip, err, c)
 		sj.jailFailCounter.Incr()

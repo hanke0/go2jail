@@ -62,13 +62,18 @@ func (j *Discipline) UnmarshalYAML(b []byte) error {
 }
 
 type Jailer interface {
-	Arrest(ip net.IP, log Logger) error
+	Arrest(data BadLog, log Logger) error
 	Close() error
 }
 
+type BadLog struct {
+	Line string
+	IP   net.IP
+}
+
 type Discipliner interface {
-	Watch(log Logger) (<-chan net.IP, error)
-	Test(log Logger) (<-chan net.IP, error)
+	Watch(log Logger) (<-chan BadLog, error)
+	Test(log Logger) (<-chan BadLog, error)
 	Close() error
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -89,5 +90,6 @@ func TestChanWrite(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, len(c), n)
 	}
+	time.Sleep(time.Millisecond * 100) // wait channel consume
 	require.Equal(t, []string{"123456", "789", "012"}, lines)
 }

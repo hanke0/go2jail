@@ -201,9 +201,9 @@ discipline:
 	lines := `1.1.1.1
 1.1.1.1
 2.2.2.2`
-	expect := `1.1.1.1
-1.1.1.1
-2.2.2.2
+	expect := `1.1.1.1 1.1.1.1
+1.1.1.1 1.1.1.1
+2.2.2.2 2.2.2.2
 `
 	testDisciplineLogAndReject(t, cfg, lines, expect)
 }
@@ -229,10 +229,10 @@ discipline:
     matches: ['%(ip)']
 `
 	lines := ``
-	expect := `3.3.3.3
-3.3.3.4
-3.3.3.5
-3.3.3.6
+	expect := `3.3.3.3 3.3.3.3
+3.3.3.4 3.3.3.4
+3.3.3.5 3.3.3.5
+3.3.3.6 3.3.3.6
 `
 	testDisciplineLogAndReject(t, cfg, lines, expect)
 }
@@ -268,8 +268,8 @@ discipline:
 	wait, _, err := entry(&flags)
 	require.NoError(t, err)
 	wait()
-	require.Equal(t, `1.1.1.1
-2.2.2.2
+	require.Equal(t, `1.1.1.1 1.1.1.1
+2.2.2.2 2.2.2.2
 `, bs.String())
 }
 
