@@ -129,8 +129,8 @@ type: echo`))
 	testDisciplineJail = &j
 }
 
-func (ej *EchoJail) Arrest(ip BadLog, log Logger) error {
-	fmt.Fprintln(Stdout, ip.IP.String(), ip.Line)
+func (ej *EchoJail) Arrest(bad BadLog, log Logger) error {
+	fmt.Fprintln(Stdout, bad.IP.String(), bad.Line)
 	ej.jailSuccessCounter.Incr()
 	return nil
 }
@@ -158,8 +158,8 @@ func NewLogJail(b []byte) (Jailer, error) {
 	return &j, nil
 }
 
-func (ej *LogJail) Arrest(ip BadLog, log Logger) error {
-	log.Errorf("[jail-echo][%s] arrest ip %s by line: %s", ej.ID, ip, ip.Line)
+func (ej *LogJail) Arrest(bad BadLog, log Logger) error {
+	log.Errorf("[jail-echo][%s] arrest ip %s", ej.ID, bad.IP)
 	ej.jailSuccessCounter.Incr()
 	return nil
 }
@@ -193,13 +193,13 @@ func NewShellJail(b []byte) (Jailer, error) {
 	return &j, nil
 }
 
-func (sj *ShellJail) Arrest(ip BadLog, log Logger) error {
-	c, err := RunScript(sj.Run, &sj.ScriptOption, ip.IP.String(), ip.Line)
+func (sj *ShellJail) Arrest(bad BadLog, log Logger) error {
+	c, err := RunScript(sj.Run, &sj.ScriptOption, bad.IP.String(), bad.Line)
 	if err != nil {
-		log.Errorf("[jail-shell][%s] arrest ip %s fail: %v, %s", sj.ID, ip, err, c)
+		log.Errorf("[jail-shell][%s] arrest ip %s fail: %v, %s", sj.ID, bad, err, c)
 		sj.jailFailCounter.Incr()
 	} else {
-		log.Infof("[jail-shell][%s] arrest ip %s success", sj.ID, ip)
+		log.Infof("[jail-shell][%s] arrest ip %s success", sj.ID, bad.IP)
 		sj.jailSuccessCounter.Incr()
 	}
 	return err

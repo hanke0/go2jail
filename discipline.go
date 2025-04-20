@@ -83,10 +83,10 @@ func (fd *CommonDiscipline) doLine(prefix, line string, ch *Chan[BadLog], logger
 			return err
 		}
 		fd.sendJailSuccessCount.Incr()
-		logger.Infof("[discipline][%s] arrest(%s): %s", prefix, desc, sip)
+		logger.Infof("[discipline][%s] arrest(%s): %s %s", prefix, desc, sip, line)
 	} else {
 		fd.watchIPCount.Incr()
-		logger.Infof("[discipline][%s] watch-on(%s): %s", prefix, desc, sip)
+		logger.Infof("[discipline][%s] watch-on(%s): %s %s", prefix, desc, sip, line)
 	}
 	return nil
 }
