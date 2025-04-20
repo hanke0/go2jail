@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -70,11 +71,12 @@ func (r *RingBuffer) Write(b []byte) (int, error) {
 }
 
 type ScriptOption struct {
-	Timeout      time.Duration `yaml:"timeout"`
-	Shell        string        `yaml:"shell"`
-	ShellOptions []string      `yaml:"shell_options"`
+	Timeout      time.Duration `yaml:"timeout,omitempty"`
+	Shell        string        `yaml:"shell,omitempty"`
+	ShellOptions []string      `yaml:"shell_options,omitempty"`
 
-	Output        io.Writer `yaml:"-"`
+	Stdout        io.Writer `yaml:"-"`
+	Stderr        io.Writer `yaml:"-"`
 	DiscardOutput bool      `yaml:"-"`
 }
 
@@ -124,9 +126,9 @@ func (s *ScriptOption) SetupShell() error {
 	return nil
 }
 
-const defaultRunShellOutputSize = 4096
+const defaultScriptOutputSize = 4096
 
-func NewShell(script string, opt *ScriptOption, args ...string) (*exec.Cmd, func(), error) {
+func NewScript(script string, opt *ScriptOption, args ...string) (*exec.Cmd, func(), error) {
 	if err := opt.SetupShell(); err != nil {
 		return nil, nil, err
 	}
@@ -149,39 +151,45 @@ func NewShell(script string, opt *ScriptOption, args ...string) (*exec.Cmd, func
 	cmds[len(opt.ShellOptions)] = scriptfile
 	copy(cmds[len(opt.ShellOptions)+1:], args)
 
-	ctx, cancel := context.WithTimeout(context.Background(), t)
+	var (
+		ctx    context.Context
+		cancel func()
+	)
+	if t > 0 {
+		ctx, cancel = context.WithTimeout(context.Background(), t)
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
 	cmd := exec.CommandContext(ctx, opt.Shell, cmds...)
 	if opt.DiscardOutput {
 		cmd.Stdout = nil
 		cmd.Stderr = nil
-	} else if opt.Output != nil {
-		cmd.Stdout = opt.Output
-		cmd.Stderr = cmd.Stdout
+	} else if opt.Stdout != nil || opt.Stderr != nil {
+		cmd.Stdout = opt.Stdout
+		cmd.Stderr = opt.Stderr
 	} else {
-		buf := NewRingBuffer(defaultRunShellOutputSize)
+		buf := NewRingBuffer(defaultScriptOutputSize)
 		cmd.Stdout = buf
 		cmd.Stderr = cmd.Stdout
 	}
 	return cmd, cancel, nil
 }
 
-func RunShell(script string, opt *ScriptOption, args ...string) (string, error) {
-	cmd, cancel, err := NewShell(script, opt, args...)
+func RunScript(script string, opt *ScriptOption, args ...string) (string, error) {
+	cmd, cancel, err := NewScript(script, opt, args...)
 	defer cancel()
 	if err != nil {
 		return "", err
 	}
 	err = cmd.Run()
-	if err != nil {
-		return "", err
-	}
+	var out string
 	if os.Stdout != nil && cmd.Stderr == cmd.Stdout {
 		b, ok := cmd.Stdout.(*RingBuffer)
 		if ok {
-			return string(b.Bytes()), nil
+			out = b.String()
 		}
 	}
-	return "", nil
+	return out, err
 }
 
 type counterStats struct {
@@ -368,21 +376,21 @@ func (l *logger) Debugf(format string, args ...interface{}) {
 	if l.level > LevelDebug {
 		return
 	}
-	l.log.Output(3, "[DEBUG] "+fmt.Sprintf(format, args...))
+	l.log.Output(2, "[DEBUG] "+fmt.Sprintf(format, args...))
 }
 
 func (l *logger) Infof(format string, args ...interface{}) {
 	if l.level > LevelInfo {
 		return
 	}
-	l.log.Output(3, "[INFO] "+fmt.Sprintf(format, args...))
+	l.log.Output(2, "[INFO] "+fmt.Sprintf(format, args...))
 }
 
 func (l *logger) Errorf(format string, args ...interface{}) {
 	if l.level > LevelError {
 		return
 	}
-	l.log.Output(3, "[ERROR] "+fmt.Sprintf(format, args...))
+	l.log.Output(2, "[ERROR] "+fmt.Sprintf(format, args...))
 }
 
 type Chan[T any] struct {
@@ -583,4 +591,129 @@ func YamlEncode(v any) string {
 		yaml.WithSmartAnchor(),
 	)
 	return string(b)
+}
+
+type chanWriter struct {
+	ch  *Chan[string]
+	buf []byte
+}
+
+func ChanWriter(ch *Chan[string]) io.WriteCloser {
+	return &chanWriter{
+		ch: ch,
+	}
+}
+
+func (w *chanWriter) Close() error {
+	if len(w.buf) > 0 {
+		w.ch.Send(string(w.buf))
+	}
+	return nil
+}
+
+func (w *chanWriter) Write(p []byte) (n int, err error) {
+	size := len(p)
+	for len(p) > 0 {
+		if idx := bytes.IndexByte(p, '\n'); idx > -1 {
+			w.buf = append(w.buf, p[:idx]...)
+			fmt.Println("send *****: ", string(w.buf))
+			if err := w.ch.Send(string(w.buf)); err != nil {
+				return size - len(p), err
+			}
+			p = p[idx+1:]
+			w.buf = w.buf[:0]
+			continue
+		}
+		w.buf = append(w.buf, p...)
+		break
+	}
+	if len(w.buf) >= 24*1024 {
+		w.ch.Send(string(w.buf))
+		w.buf = w.buf[:0]
+	}
+	return size, nil
+}
+
+type RestartPolicy struct {
+	raw        string
+	started    *atomic.Bool
+	always     bool
+	exitOnFail bool
+	times      int
+	notFirst   bool
+	backoff    time.Duration
+}
+
+func (rp *RestartPolicy) Stop() {
+	rp.started.Store(false)
+}
+
+func (rp *RestartPolicy) String() string {
+	return rp.raw
+}
+
+func (rp RestartPolicy) MarshalYAML() (any, error) {
+	return rp.raw, nil
+}
+
+func (rp *RestartPolicy) UnmarshalYAML(b []byte) error {
+	var (
+		s      string
+		policy string
+	)
+	if err := yaml.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	parts := strings.SplitN(s, "/", 2)
+	policy = parts[0]
+	if len(parts) > 1 {
+		d, err := time.ParseDuration(parts[1])
+		if err != nil {
+			return fmt.Errorf("bad backoff: %s, %w", s, err)
+		}
+		rp.backoff = d
+	}
+	switch policy {
+	case "always":
+		rp.always = true
+	case "on-success":
+		rp.exitOnFail = true
+	case "once":
+		rp.times = 1
+	default:
+		return fmt.Errorf("bad policy: %s", s)
+	}
+	rp.raw = s
+	rp.started = &atomic.Bool{}
+	rp.started.Store(true)
+	return nil
+}
+
+func (rp *RestartPolicy) wait() {
+	if rp.backoff > 0 {
+		if rp.notFirst {
+			time.Sleep(rp.backoff)
+		} else {
+			rp.notFirst = true
+		}
+	}
+}
+
+func (rp *RestartPolicy) Next(err error) bool {
+	if rp.started == nil || !rp.started.Load() {
+		return false
+	}
+	if rp.always {
+		rp.wait()
+		return true
+	}
+	if rp.exitOnFail {
+		return err == nil
+	}
+	if rp.times > 0 {
+		rp.times--
+		rp.wait()
+		return true
+	}
+	return false
 }

@@ -26,6 +26,7 @@ func makeTestConfig(t *testing.T, content string) string {
 	err = tpl.Execute(&s, map[string]string{
 		"dir":    dir,
 		"nftlog": p,
+		"Name":   t.Name(),
 	})
 	require.NoError(t, err)
 	text := s.String()
@@ -69,11 +70,11 @@ func testDisciplineLogAndReject(t *testing.T,
 	require.NoError(t, err)
 
 	script := fmt.Sprintf(`#!/bin/bash
-cat > %s <<'__EOF__'
+cat >> %s <<'__EOF__'
 %s
 __EOF__
 	`, watchfile, LinesContent)
-	s, err := RunShell(
+	s, err := RunScript(
 		script,
 		&ScriptOption{},
 	)
@@ -103,7 +104,7 @@ __EOF__
 func TestBasicLogAndNftReject(t *testing.T) {
 	cfg := `
 jail:
-  - id: nft
+  - id: '{{.Name}}'
     type: nftset
     sudo: false # run nft command without sudo
     nft_executable: nft # nft executable path
@@ -112,9 +113,9 @@ jail:
     ipv4_set: ipv4_block_set # nft set name for ipv4
     ipv6_set: ipv6_block_set # nft set name for ipv6
 discipline:
-  - id: test
+  - id: '{{.Name}}'
     type: log
-    jail: [nft]
+    jail: ['{{.Name}}']
     files: [{{.dir}}/test.log]
     matches: '%(ip)'
     rate: 1/1s
@@ -130,7 +131,7 @@ add element inet filter ipv4_block_set { 2.2.2.2 }
 func TestLogDisciplineRateWorks(t *testing.T) {
 	cfg := `
 jail:
-  - id: nft
+  - id: '{{.Name}}'
     type: nftset
     sudo: false # run nft command without sudo
     nft_executable: nft # nft executable path
@@ -139,9 +140,9 @@ jail:
     ipv4_set: ipv4_block_set # nft set name for ipv4
     ipv6_set: ipv6_block_set # nft set name for ipv6
 discipline:
-  - id: test
+  - id: '{{.Name}}'
     type: log
-    jail: [nft]
+    jail: ['{{.Name}}']
     files: [{{.dir}}/test.log]
     matches: ['%(ip)']
     rate: 2/10m
@@ -157,7 +158,7 @@ discipline:
 func TestLogDisciplineIgnoreWorks(t *testing.T) {
 	cfg := `
 jail:
-  - id: nft
+  - id: '{{.Name}}'
     type: nftset
     sudo: false # run nft command without sudo
     nft_executable: nft # nft executable path
@@ -166,9 +167,9 @@ jail:
     ipv4_set: ipv4_block_set # nft set name for ipv4
     ipv6_set: ipv6_block_set # nft set name for ipv6
 discipline:
-  - id: test
+  - id: '{{.Name}}'
     type: log
-    jail: [nft]
+    jail: ['{{.Name}}']
     files: [{{.dir}}/test.log]
     matches: ['%(ip)']
     ignores: '^1\.'
@@ -185,14 +186,14 @@ discipline:
 func TestShellJailWorks(t *testing.T) {
 	cfg := `
 jail:
-  - id: shell
+  - id: '{{.Name}}'
     type: shell
     run: |
       nft "$@"
 discipline:
-  - id: test
+  - id: '{{.Name}}'
     type: log
-    jail: [shell]
+    jail: ['{{.Name}}']
     files: [{{.dir}}/test.log]
     matches: ['%(ip)']
     rate: 1/s
@@ -207,15 +208,44 @@ discipline:
 	testDisciplineLogAndReject(t, cfg, lines, expect)
 }
 
+func TestShellDiscipline(t *testing.T) {
+	cfg := `
+jail:
+  - id: '{{.Name}}'
+    type: shell
+    run: |
+      nft "$@"
+discipline:
+  - id: '{{.Name}}'
+    type: shell
+    jail: ['{{.Name}}']
+    run: |
+      echo 3.3.3.3
+      echo 3.3.3.4
+      echo 3.3.3.5
+      echo 3.3.3.6
+      exit 1
+    restart_policy: 'on-success/10s'
+    matches: ['%(ip)']
+`
+	lines := ``
+	expect := `3.3.3.3
+3.3.3.4
+3.3.3.5
+3.3.3.6
+`
+	testDisciplineLogAndReject(t, cfg, lines, expect)
+}
+
 func TestTestingWorks(t *testing.T) {
 	dir := makeTestConfig(t, `
 jail:
-  - id: log
+  - id: '{{.Name}}'
     type: log
 discipline:
   - id: test
-    type: log
-    jail: [log]
+    type: 'log'
+    jail: ['{{.Name}}']
     files: [{{.dir}}/test.log]
     matches: ['%(ip)']
     rate: 1/s
@@ -246,12 +276,12 @@ discipline:
 func TestFileNotExistsOK(t *testing.T) {
 	dir := makeTestConfig(t, `
 jail:
-  - id: test
+  - id: '{{.Name}}'
     type: echo
 discipline:
-  - id: test
+  - id: '{{.Name}}'
     type: log
-    jail: [test]
+    jail: ['{{.Name}}']
     files: [{{.dir}}/absent.txt]
     matches: ['%(ip)']
     skip_when_file_not_exists: true
@@ -267,12 +297,12 @@ discipline:
 
 	dir = makeTestConfig(t, `
 jail:
-  - id: test
+  - id: '{{.Name}}'
     type: echo
 discipline:
-  - id: test
+  - id: '{{.Name}}'
     type: log
-    jail: [test]
+    jail: ['{{.Name}}']
     files: [{{.dir}}/absent.txt]
     matches: ['%(ip)']
 `)

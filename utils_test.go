@@ -45,8 +45,8 @@ func TestRingBuffer(t *testing.T) {
 	require.Equal(t, []byte("6789012345"), buf.Bytes())
 }
 
-func TestRunShell(t *testing.T) {
-	o, err := RunShell(
+func TestRunScript(t *testing.T) {
+	o, err := RunScript(
 		`#!/bin/bash
 
 printf '%s\n' "$@"`,
@@ -55,4 +55,39 @@ printf '%s\n' "$@"`,
 	require.NoError(t, err)
 	require.Equal(t, `--argsnotexists
 `+t.Name()+"\n", o)
+}
+
+func TestRunScriptFail(t *testing.T) {
+	o, err := RunScript(
+		`#!/bin/bash
+
+printf '%s\n' "$@"
+exit 2`,
+		&ScriptOption{},
+		"--argsnotexists", t.Name())
+	require.Error(t, err)
+	require.Equal(t, `--argsnotexists
+`+t.Name()+"\n", o)
+}
+
+func TestChanWrite(t *testing.T) {
+	var ch = NewChan[string](0)
+	var lines []string
+	go func() {
+		for line := range ch.Reader() {
+			t.Log("read: ", line)
+			lines = append(lines, line)
+		}
+	}()
+	w := ChanWriter(ch)
+	for _, c := range []string{
+		"123",
+		"456\n789",
+		"\n012\n",
+	} {
+		n, err := w.Write([]byte(c))
+		require.NoError(t, err)
+		require.Equal(t, len(c), n)
+	}
+	require.Equal(t, []string{"123456", "789", "012"}, lines)
 }

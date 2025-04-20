@@ -82,7 +82,7 @@ func (nj *NftJail) Arrest(ip net.IP, log Logger) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, program[0], program[1:]...)
-	buf := NewRingBuffer(defaultRunShellOutputSize)
+	buf := NewRingBuffer(defaultScriptOutputSize)
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	err := cmd.Run()
@@ -194,7 +194,7 @@ func NewShellJail(b []byte) (Jailer, error) {
 }
 
 func (sj *ShellJail) Arrest(ip net.IP, log Logger) error {
-	c, err := RunShell(sj.Run, &sj.ScriptOption, ip.String())
+	c, err := RunScript(sj.Run, &sj.ScriptOption, ip.String())
 	if err != nil {
 		log.Errorf("[jail-shell][%s] arrest ip %s fail: %v, %s", sj.ID, ip, err, c)
 		sj.jailFailCounter.Incr()

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,9 +18,14 @@ import (
 
 func init() {
 	RegisterDiscipline("log", NewFileDiscipline)
+	RegisterDiscipline("shell", NewShellDiscipline)
 }
 
-type disciplineCounter struct {
+type CommonDiscipline struct {
+	Matches *Matcher `yaml:"matches,omitempty"`
+	Ignores *Matcher `yaml:"ignores,omitempty"`
+	Rate    *Limiter `yaml:"rate,omitempty"`
+
 	tailLinesCount       *Counter
 	matchLineCount       *Counter
 	badIPLineCount       *Counter
@@ -28,26 +34,69 @@ type disciplineCounter struct {
 	sendJailFailCount    *Counter
 }
 
-func (f *disciplineCounter) initCounter(id string) {
+func (f *CommonDiscipline) Init(id string) error {
 	f.tailLinesCount = RegisterNewCounter(fmt.Sprintf("%s_tail_lines", id))
 	f.matchLineCount = RegisterNewCounter(fmt.Sprintf("%s_match_lines", id))
 	f.badIPLineCount = RegisterNewCounter(fmt.Sprintf("%s_bad_ip_lines", id))
 	f.watchIPCount = RegisterNewCounter(fmt.Sprintf("%s_watch_ip", id))
 	f.sendJailSuccessCount = RegisterNewCounter(fmt.Sprintf("%s_send_jail_success", id))
 	f.sendJailFailCount = RegisterNewCounter(fmt.Sprintf("%s_send_jail_fail", id))
+	if f.Matches == nil {
+		return fmt.Errorf("[discipline][%s] matches is nil", id)
+	}
+	if err := f.Matches.ExpectGroups("ip"); err != nil {
+		v, _ := f.Matches.MarshalYAML()
+		return fmt.Errorf("[discipline][%s] bad matches: %w, %s", id, err, v)
+	}
+	return nil
+}
+
+func (fd *CommonDiscipline) doLine(prefix, line string, ch *Chan[net.IP], logger Logger) error {
+	fd.tailLinesCount.Incr()
+	if line == "" || fd.Matches == nil {
+		return nil
+	}
+	fd.tailLinesCount.Incr()
+	groups := fd.Matches.Match(line)
+	if len(groups) == 0 {
+		logger.Debugf("[discipline][%s] regex not match: %s: length=%d", prefix, len(line))
+		return nil
+	}
+	if fd.Ignores != nil && fd.Ignores.Test(groups[0]) {
+		logger.Debugf("[discipline][%s] regex ignore: %s: length=%d", prefix, len(line))
+		return nil
+	}
+	fd.matchLineCount.Incr()
+	ip := net.ParseIP(groups[1])
+	if ip == nil {
+		fd.badIPLineCount.Incr()
+		return nil
+	}
+	sip := ip.String()
+	if desc, ok := fd.Rate.Add(sip); ok {
+		if err := ch.Send(ip); err != nil {
+			logger.Errorf("[discipline][%s] arrest send fail: %s %v", prefix, sip, err)
+			fd.sendJailFailCount.Incr()
+			return err
+		}
+		fd.sendJailSuccessCount.Incr()
+		logger.Infof("[discipline][%s] arrest(%s): %s", prefix, desc, sip)
+	} else {
+		fd.watchIPCount.Incr()
+		logger.Infof("[discipline][%s] watch-on(%s): %s", prefix, desc, sip)
+	}
+	return nil
 }
 
 type FileDiscipline struct {
-	ID                    string   `yaml:"id"`
-	Files                 []string `yaml:"files"`
-	Matches               *Matcher `yaml:"matches,omitempty"`
-	Ignores               *Matcher `yaml:"ignores,omitempty"`
-	Rate                  *Limiter `yaml:"rate,omitempty"`
-	SkipWhenFileNotExists bool     `yaml:"skip_when_file_not_exists"`
+	ID               string   `yaml:"id"`
+	Files            []string `yaml:"files"`
+	CommonDiscipline `yaml:",inline"`
 
-	disciplineCounter
+	SkipWhenFileNotExists bool `yaml:"skip_when_file_not_exists"`
+
 	ctx     context.Context
-	cancel  func()
+	cancel  Cleaner
 	wg      sync.WaitGroup
 	wgCount atomic.Int32
 }
@@ -57,18 +106,18 @@ func NewFileDiscipline(b []byte) (Discipliner, error) {
 	if err := yaml.Unmarshal(b, &f); err != nil {
 		return nil, err
 	}
-	if f.Matches == nil {
-		return nil, fmt.Errorf("[discipline][%s] matches is nil", f.ID)
-	}
-	if err := f.Matches.ExpectGroups("ip"); err != nil {
-		return nil, fmt.Errorf("[discipline][%s] matches: %w", f.ID, err)
-	}
-
-	f.ctx, f.cancel = context.WithCancel(context.Background())
 	if f.ID == "" {
 		f.ID = randomString(8)
 	}
-	f.disciplineCounter.initCounter(f.ID)
+	if len(f.Files) == 0 {
+		return nil, fmt.Errorf("[discipline][%s] files is empty", f.ID)
+	}
+	if err := f.CommonDiscipline.Init(f.ID); err != nil {
+		return nil, err
+	}
+	var cancel func()
+	f.ctx, cancel = context.WithCancel(context.Background())
+	f.cancel.Prepend(cancel)
 	return &f, nil
 }
 
@@ -98,14 +147,6 @@ func (fd *FileDiscipline) tail(f string, testing bool) (t *tail.Tail, err error)
 	return
 }
 
-func (fd *FileDiscipline) addCancel(f func()) {
-	old := fd.cancel
-	fd.cancel = func() {
-		old()
-		f()
-	}
-}
-
 func (fd *FileDiscipline) Watch(logger Logger) (<-chan net.IP, error) {
 	return fd.watch(logger, false)
 }
@@ -117,7 +158,7 @@ func (fd *FileDiscipline) Test(logger Logger) (<-chan net.IP, error) {
 func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, error) {
 	logger.Infof("[discipline][%s] watch start: rate=%s", fd.ID, fd.Rate.String())
 	ch := NewChan[net.IP](0)
-	fd.addCancel(ch.Close)
+	fd.cancel.Prepend(ch.Close)
 	for _, f := range fd.Files {
 		if fd.SkipWhenFileNotExists {
 			_, err := os.Open(f)
@@ -127,7 +168,7 @@ func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, err
 		}
 		t, err := fd.tail(f, testing)
 		if err != nil {
-			fd.cancel()
+			fd.cancel.Clean()
 			return nil, err
 		}
 		fd.wg.Add(1)
@@ -135,13 +176,15 @@ func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, err
 		go func(t *tail.Tail, f string) {
 			defer func() {
 				fd.wg.Done()
+				// all files closed read. stop watch
 				if fd.wgCount.Add(-1) <= 0 {
-					fd.cancel()
+					fd.cancel.Clean()
 				}
 				t.Stop()
 				t.Cleanup()
 			}()
 			logger.Debugf("[discipline][%s] watch file: %s", fd.ID, f)
+			prefix := fd.ID + f
 			for {
 				select {
 				case <-fd.ctx.Done():
@@ -157,58 +200,159 @@ func (fd *FileDiscipline) watch(logger Logger, testing bool) (<-chan net.IP, err
 						return
 					}
 					logger.Debugf("[discipline][%s] get line from %s: length=%d", fd.ID, f, len(line.Text))
-					fd.tailLinesCount.Incr()
-					if len(line.Text) > 0 {
-						if err := fd.doLine(f, line.Text, ch, logger); err != nil {
-							return
-						}
+					if err := fd.CommonDiscipline.doLine(prefix, line.Text, ch, logger); err != nil {
+						return
 					}
 				}
 			}
 		}(t, f)
 	}
-	if fd.wgCount.Load() == 0 {
-		fd.cancel()
-		return ch.Reader(), nil
-	}
 	return ch.Reader(), nil
 }
 
 func (fd *FileDiscipline) Close() error {
-	fd.cancel()
+	fd.cancel.Clean()
 	fd.wg.Wait()
 	fd.Rate.Stop()
 	return nil
 }
 
-func (fd *FileDiscipline) doLine(f, line string, ch *Chan[net.IP], logger Logger) error {
-	groups := fd.Matches.Match(line)
-	if len(groups) == 0 {
-		logger.Debugf("[discipline][%s] regex not match: %s: length=%d", fd.ID, f, len(line))
-		return nil
+type ShellDiscipline struct {
+	ID               string `yaml:"id"`
+	Run              string `yaml:"run"`
+	ScriptOption     `yaml:",inline"`
+	CommonDiscipline `yaml:",inline"`
+	RestartPolicy    *RestartPolicy `yaml:"restart_policy"`
+
+	ch     *Chan[string]
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel func()
+}
+
+func NewShellDiscipline(b []byte) (Discipliner, error) {
+	var s ShellDiscipline
+	if err := yaml.Unmarshal(b, &s); err != nil {
+		return nil, err
 	}
-	if fd.Ignores != nil && fd.Ignores.Test(groups[0]) {
-		logger.Debugf("[discipline][%s] regex ignore: %s: length=%d", fd.ID, f, len(line))
-		return nil
+	if err := s.CommonDiscipline.Init(s.ID); err != nil {
+		return nil, err
 	}
-	fd.matchLineCount.Incr()
-	ip := net.ParseIP(groups[1])
-	if ip == nil {
-		fd.badIPLineCount.Incr()
-		return nil
+	if s.RestartPolicy == nil {
+		return nil, fmt.Errorf("[discipline][%s] restart_policy is nil", s.ID)
 	}
-	sip := ip.String()
-	if desc, ok := fd.Rate.Add(sip); ok {
-		if err := ch.Send(ip); err != nil {
-			logger.Errorf("[discipline][%s] arrest send fail: %s %v", fd.ID, sip, err)
-			fd.sendJailFailCount.Incr()
+	if err := s.ScriptOption.SetupShell(); err != nil {
+		return nil, fmt.Errorf("[discipline][%s] setup shell fail: %w", s.ID, err)
+	}
+	s.ch = NewChan[string](0)
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	return &s, nil
+}
+
+func (sd *ShellDiscipline) Test(logger Logger) (<-chan net.IP, error) {
+	v, err := sd.Watch(logger)
+	sd.RestartPolicy.Stop()
+	return v, err
+}
+
+func (sd *ShellDiscipline) Watch(logger Logger) (<-chan net.IP, error) {
+	logger.Infof("[discipline][%s] watch starting", sd.ID)
+	sd.RestartPolicy.Next(nil)
+	cmd, cancel, err := sd.execute(logger)
+	if err != nil {
+		sd.clean()
+		return nil, err
+	}
+	sd.wg.Add(1)
+	go func() {
+		defer func() {
+			sd.clean()
+			sd.wg.Done()
+		}()
+		waitExit := func() error {
+			logger.Debugf("[discipline][%s] waiting exec exit", sd.ID)
+			err := cmd.Wait()
+			cancel()
+			logger.Debugf("[discipline][%s] exec exit with error: %v", sd.ID, err)
 			return err
 		}
-		fd.sendJailSuccessCount.Incr()
-		logger.Infof("[discipline][%s] arrest(%s): %s", fd.ID, desc, sip)
-	} else {
-		fd.watchIPCount.Incr()
-		logger.Infof("[discipline][%s] watch-on(%s): %s", fd.ID, desc, sip)
+		exeErr := waitExit()
+		for sd.RestartPolicy.Next(exeErr) {
+			logger.Debugf("[discipline][%s] exec restart: exiterr=%v", sd.ID, exeErr)
+			cmd, cancel, exeErr = sd.execute(logger)
+			if exeErr == nil {
+				exeErr = waitExit()
+			}
+			select {
+			case <-sd.ctx.Done():
+				logger.Infof("[discipline][%s] exec exit by context done", sd.ID)
+				return
+			default:
+			}
+		}
+		logger.Infof("[discipline][%s] exec exit by restart_policy: exiterr=%v", sd.ID, exeErr)
+	}()
+	ch := NewChan[net.IP](0)
+	sd.wg.Add(1)
+	go func() {
+		defer func() {
+			sd.clean()
+			sd.wg.Done()
+		}()
+		rd := sd.ch.Reader()
+		for {
+			select {
+			case <-sd.ctx.Done():
+				logger.Infof("[discipline][%s] close watch context done", sd.ID)
+				return
+			case line, ok := <-rd:
+				if !ok {
+					logger.Infof("[discipline][%s] close watch channel closed", sd.ID)
+					return
+				}
+				if err := sd.CommonDiscipline.doLine(sd.ID, line, ch, logger); err != nil {
+					logger.Infof("[discipline][%s] closed with fail", sd.ID, err)
+					return
+				}
+			}
+		}
+	}()
+	logger.Infof("[discipline][%s] watch started", sd.ID)
+	return ch.Reader(), nil
+}
+
+func (sd *ShellDiscipline) execute(logger Logger) (cmd *exec.Cmd, cancel func(), err error) {
+	opt := &ScriptOption{
+		Shell:        sd.ScriptOption.Shell,
+		ShellOptions: sd.ScriptOption.ShellOptions,
+		Timeout:      -1,
+		Stdout:       ChanWriter(sd.ch),
+		Stderr:       ChanWriter(sd.ch),
 	}
+	cmd, cancelCtx, err := NewScript(sd.Run, opt, sd.ID)
+	if err != nil {
+		logger.Errorf("[discipline][%s] new shell script fail: %v", sd.ID, err)
+		return nil, nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		cancelCtx()
+		logger.Errorf("[discipline][%s] start shell script fail: %v", sd.ID, err)
+		return nil, nil, err
+	}
+	return cmd, func() {
+		cancelCtx()
+		cmd.Stdout.(io.Closer).Close()
+		cmd.Stderr.(io.Closer).Close()
+	}, nil
+}
+
+func (sd *ShellDiscipline) clean() {
+	sd.cancel()
+	sd.ch.Close()
+}
+
+func (sd *ShellDiscipline) Close() error {
+	sd.clean()
+	sd.wg.Wait()
 	return nil
 }
