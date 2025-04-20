@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os/exec"
@@ -78,13 +79,15 @@ func (nj *NftJail) Arrest(ip net.IP, log Logger) error {
 		s,
 		"}",
 	)
-	f, err := Execute(ExecuteOptions{
-		Program:    program,
-		OutputSize: 1024,
-		Timeout:    time.Second * 5,
-	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, program[0], program[1:]...)
+	buf := NewRingBuffer(defaultRunShellOutputSize)
+	cmd.Stdout = buf
+	cmd.Stderr = buf
+	err := cmd.Run()
 	if err != nil {
-		log.Errorf("[jail-nft][%s] arrest ip %s: err=%v, output=%s", nj.ID, s, err, f)
+		log.Errorf("[jail-nft][%s] arrest ip %s: err=%v, program=%v output=%s", nj.ID, s, err, program, buf.String())
 		nj.jailFailCounter.Incr()
 	} else {
 		log.Infof("[jail-nft][%s] arrest ip %s success", nj.ID, s)
@@ -166,9 +169,9 @@ func (ej *LogJail) Close() error {
 }
 
 type ShellJail struct {
-	ID      string   `yaml:"id"`
-	Command string   `yaml:"command"`
-	Args    []string `yaml:"args"`
+	ID           string `yaml:"id"`
+	Run          string `yaml:"run"`
+	ScriptOption `yaml:",inline"`
 
 	jailSuccessCounter *Counter `yaml:"-"`
 	jailFailCounter    *Counter `yaml:"-"`
@@ -179,11 +182,9 @@ func NewShellJail(b []byte) (Jailer, error) {
 	if err := yaml.Unmarshal(b, &j); err != nil {
 		return nil, err
 	}
-	cmd, err := exec.LookPath(j.Command)
-	if err != nil {
+	if err := j.ScriptOption.SetupShell(); err != nil {
 		return nil, err
 	}
-	j.Command = cmd
 	if j.ID == "" {
 		j.ID = randomString(8)
 	}
@@ -193,21 +194,7 @@ func NewShellJail(b []byte) (Jailer, error) {
 }
 
 func (sj *ShellJail) Arrest(ip net.IP, log Logger) error {
-	program := append([]string{sj.Command}, sj.Args...)
-	if sj.Args == nil {
-		program = append(program, ip.String())
-	}
-	for i, arg := range program {
-		switch arg {
-		case "%(ip)":
-			program[i] = ip.String()
-		default:
-		}
-	}
-	c, err := Execute(ExecuteOptions{
-		Program:    program,
-		OutputSize: 1024,
-	})
+	c, err := RunShell(sj.Run, &sj.ScriptOption, ip.String())
 	if err != nil {
 		log.Errorf("[jail-shell][%s] arrest ip %s fail: %v, %s", sj.ID, ip, err, c)
 		sj.jailFailCounter.Incr()

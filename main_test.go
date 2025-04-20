@@ -21,9 +21,11 @@ func makeTestConfig(t *testing.T, content string) string {
 	t.Cleanup(func() {
 		os.RemoveAll(dir)
 	})
+	p := writeTestNft(t, dir)
 	var s strings.Builder
 	err = tpl.Execute(&s, map[string]string{
-		"dir": dir,
+		"dir":    dir,
+		"nftlog": p,
 	})
 	require.NoError(t, err)
 	text := s.String()
@@ -51,15 +53,14 @@ echo "$@" >>"$dir/nft.log"
 	return filepath.Join(dir, "nft.log")
 }
 
-func testDisciplineLogAndNftReject(t *testing.T,
+func testDisciplineLogAndReject(t *testing.T,
 	configContent, LinesContent, expect string) string {
 	t.Helper()
 	dir := makeTestConfig(t, configContent)
+	nftlog := filepath.Join(dir, "nft.log")
 	watchfile := filepath.Join(dir, "test.log")
 	err := os.WriteFile(watchfile, nil, 0777)
 	require.NoError(t, err)
-	nftlog := writeTestNft(t, dir)
-
 	flags := Flags{
 		ConfigDir: dir,
 		LogLevel:  "debug",
@@ -72,10 +73,10 @@ cat > %s <<'__EOF__'
 %s
 __EOF__
 	`, watchfile, LinesContent)
-	s, err := Execute(ExecuteOptions{
-		Program:    []string{"bash", "-c", script},
-		OutputSize: 1024,
-	})
+	s, err := RunShell(
+		script,
+		&ScriptOption{},
+	)
 	require.NoError(t, err, s)
 	for range 50 {
 		_, err := os.Stat(nftlog)
@@ -123,7 +124,7 @@ discipline:
 	expect := `add element inet filter ipv4_block_set { 1.1.1.1 }
 add element inet filter ipv4_block_set { 2.2.2.2 }
 `
-	testDisciplineLogAndNftReject(t, cfg, lines, expect)
+	testDisciplineLogAndReject(t, cfg, lines, expect)
 }
 
 func TestLogDisciplineRateWorks(t *testing.T) {
@@ -150,7 +151,7 @@ discipline:
 2.2.2.2`
 	expect := `add element inet filter ipv4_block_set { 1.1.1.1 }
 `
-	testDisciplineLogAndNftReject(t, cfg, lines, expect)
+	testDisciplineLogAndReject(t, cfg, lines, expect)
 }
 
 func TestLogDisciplineIgnoreWorks(t *testing.T) {
@@ -178,7 +179,32 @@ discipline:
 2.2.2.2`
 	expect := `add element inet filter ipv4_block_set { 2.2.2.2 }
 `
-	testDisciplineLogAndNftReject(t, cfg, lines, expect)
+	testDisciplineLogAndReject(t, cfg, lines, expect)
+}
+
+func TestShellJailWorks(t *testing.T) {
+	cfg := `
+jail:
+  - id: shell
+    type: shell
+    run: |
+      nft "$@"
+discipline:
+  - id: test
+    type: log
+    jail: [shell]
+    files: [{{.dir}}/test.log]
+    matches: ['%(ip)']
+    rate: 1/s
+`
+	lines := `1.1.1.1
+1.1.1.1
+2.2.2.2`
+	expect := `1.1.1.1
+1.1.1.1
+2.2.2.2
+`
+	testDisciplineLogAndReject(t, cfg, lines, expect)
 }
 
 func TestTestingWorks(t *testing.T) {

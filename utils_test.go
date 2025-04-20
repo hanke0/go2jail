@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -46,25 +45,14 @@ func TestRingBuffer(t *testing.T) {
 	require.Equal(t, []byte("6789012345"), buf.Bytes())
 }
 
-func TestCommand(t *testing.T) {
-	f, err := os.CreateTemp("", "go2jail-test-*")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		f.Close()
-		os.Remove(f.Name())
-	})
-	err = f.Chmod(0777)
-	require.NoError(t, err)
-	_, err = f.WriteString(`#!/bin/bash
+func TestRunShell(t *testing.T) {
+	o, err := RunShell(
+		`#!/bin/bash
 
-echo "$@"`)
+printf '%s\n' "$@"`,
+		&ScriptOption{},
+		"--argsnotexists", t.Name())
 	require.NoError(t, err)
-	f.Close()
-	o, err := Execute(ExecuteOptions{
-		Program:    []string{f.Name(), "aaa"},
-		OutputSize: 1024,
-	})
-	require.NoError(t, err)
-	require.Equal(t, `aaa
-`, o)
+	require.Equal(t, `--argsnotexists
+`+t.Name()+"\n", o)
 }

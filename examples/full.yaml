@@ -1,0 +1,72 @@
+jail:
+  # NFTables Jail - Blocks IPs using Linux nftables sets
+  # Requires nftables installed and proper permissions
+  - id: nft
+    type: nftset
+    #sudo: false         # Run nft commands without sudo (requires CAP_NET_ADMIN)
+    #nft_executable: nft # Custom path to nft binary if not in $PATH
+    rule: inet # NFTables rule family (inet/ip6/arp/etc)
+    table: filter # NFTables table name to modify
+    ipv4_set: ipv4_block_set # IPv4 set name (must exist in nftables config)
+    ipv6_set: ipv6_block_set # IPv6 set name (must exist in nftables config)
+
+  # Echo Jail - Debugging tool that prints blocked IPs to stdout
+  # Does NOT perform actual blocking - use for testing/config validation
+  - id: echo
+    type: echo
+
+  # Shell Jail - Execute custom scripts for advanced blocking scenarios
+  # Script receives blocked IP as first argument ($1)
+  - id: shell
+    type: shell
+    #shell: bash         # Shell interpreter (default: bash or sh)
+    #shell_options: ['-e'] # Shell execution options (default: -e for error checking)
+    #timeout: 60s       # Maximum execution time (units: s=seconds, m=minutes)
+    run: |
+      ip="$1"  # Blocked IP passed as first parameter
+      echo "Blocking IP: $ip"  # Example command - replace with actual blocking logic
+
+# IP Allow List - Bypass blocking for trusted IPs/CIDRs
+# Format: IPv4/IPv6 addresses with optional CIDR notation (e.g., 192.168.1.0/24)
+#allow:
+#  - 1.1.1.1/32    # Example: Allow specific IPv4
+#  - 2001:db8::/32 # Example: Allow IPv6 network
+
+# Security Discipline Configuration
+# Define attack patterns and response rules for monitored services
+discipline:
+  - id: sshd # Unique identifier for this security rule set
+    type: log # Input type (log file monitoring)
+    # Jails to activate for blocking
+    jail: ['nft', 'echo', 'shell']
+    # Rate limit: 5 events per 10 minutes triggers blocking.
+    # Format: <count>/[interval]<unit>
+    # Support Units: ms=milliseconds, s=seconds, m=minutes, h=hours, d=days
+    # If interval is omitted, default to 1.
+    # Examples:
+    #   10/100ms (10 events per 100 milliseconds)
+    #   1/s (1 event per second)
+    #   10/5s (10 events per 5 seconds)
+    #   10/m (10 events per 1 minutes)
+    #   5/10m (5 events per 10 minutes)
+    #   5/h (5 events per 1 hour)
+    #   5/d (5 events per 1 day)
+    rate: 5/10m
+
+    # Log monitoring configuration
+    files:
+      - /var/log/auth.log # System authentication log file path
+
+    # Attack detection patterns (https://pkg.go.dev/regexp/syntax)
+    # Must contain exactly one named capture group 'ip'.
+    # Pattern notes:
+    # %(ip) is predefined regex that match a named group 'ip' both IPv4 and IPv6,
+    # %(ip) will be replaced with real regex before pattern compile.
+    matches:
+      # Detect SSH authentication failures with remote IP
+      - authentication\s+failure.+?rhost=%(ip)
+
+    # Ignore patterns - exclude matches from blocking
+    ignores:
+      - rhost=127\.0\.0\.1 # Ignore localhost connections
+

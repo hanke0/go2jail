@@ -19,6 +19,24 @@ func init() {
 	RegisterDiscipline("log", NewFileDiscipline)
 }
 
+type disciplineCounter struct {
+	tailLinesCount       *Counter
+	matchLineCount       *Counter
+	badIPLineCount       *Counter
+	watchIPCount         *Counter
+	sendJailSuccessCount *Counter
+	sendJailFailCount    *Counter
+}
+
+func (f *disciplineCounter) initCounter(id string) {
+	f.tailLinesCount = RegisterNewCounter(fmt.Sprintf("%s_tail_lines", id))
+	f.matchLineCount = RegisterNewCounter(fmt.Sprintf("%s_match_lines", id))
+	f.badIPLineCount = RegisterNewCounter(fmt.Sprintf("%s_bad_ip_lines", id))
+	f.watchIPCount = RegisterNewCounter(fmt.Sprintf("%s_watch_ip", id))
+	f.sendJailSuccessCount = RegisterNewCounter(fmt.Sprintf("%s_send_jail_success", id))
+	f.sendJailFailCount = RegisterNewCounter(fmt.Sprintf("%s_send_jail_fail", id))
+}
+
 type FileDiscipline struct {
 	ID                    string   `yaml:"id"`
 	Files                 []string `yaml:"files"`
@@ -26,17 +44,12 @@ type FileDiscipline struct {
 	Ignores               *Matcher `yaml:"ignores,omitempty"`
 	Rate                  *Limiter `yaml:"rate,omitempty"`
 	SkipWhenFileNotExists bool     `yaml:"skip_when_file_not_exists"`
-	ctx                   context.Context
-	cancel                func()
-	wg                    sync.WaitGroup
-	wgCount               atomic.Int32
 
-	tailLinesCount       *Counter
-	matchLineCount       *Counter
-	badIPLineCount       *Counter
-	watchIPCount         *Counter
-	sendJailSuccessCount *Counter
-	sendJailFailCount    *Counter
+	disciplineCounter
+	ctx     context.Context
+	cancel  func()
+	wg      sync.WaitGroup
+	wgCount atomic.Int32
 }
 
 func NewFileDiscipline(b []byte) (Discipliner, error) {
@@ -55,12 +68,7 @@ func NewFileDiscipline(b []byte) (Discipliner, error) {
 	if f.ID == "" {
 		f.ID = randomString(8)
 	}
-	f.tailLinesCount = RegisterNewCounter(fmt.Sprintf("%s_tail_lines", f.ID))
-	f.matchLineCount = RegisterNewCounter(fmt.Sprintf("%s_match_lines", f.ID))
-	f.badIPLineCount = RegisterNewCounter(fmt.Sprintf("%s_bad_ip_lines", f.ID))
-	f.watchIPCount = RegisterNewCounter(fmt.Sprintf("%s_watch_ip", f.ID))
-	f.sendJailSuccessCount = RegisterNewCounter(fmt.Sprintf("%s_send_jail_success", f.ID))
-	f.sendJailFailCount = RegisterNewCounter(fmt.Sprintf("%s_send_jail_fail", f.ID))
+	f.disciplineCounter.initCounter(f.ID)
 	return &f, nil
 }
 

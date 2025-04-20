@@ -2,13 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math/rand"
+	"os"
 	"os/exec"
+	"os/user"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -32,6 +37,10 @@ func NewRingBuffer(size int) *RingBuffer {
 
 func (b *RingBuffer) Bytes() []byte {
 	return b.buf
+}
+
+func (b *RingBuffer) String() string {
+	return string(b.buf)
 }
 
 func (r *RingBuffer) Write(b []byte) (int, error) {
@@ -60,43 +69,119 @@ func (r *RingBuffer) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-type ExecuteOptions struct {
-	Timeout    time.Duration `yaml:"timeout"`
-	OutputSize int           `yaml:"output_size"`
-	Program    []string      `yaml:"program"`
+type ScriptOption struct {
+	Timeout      time.Duration `yaml:"timeout"`
+	Shell        string        `yaml:"shell"`
+	ShellOptions []string      `yaml:"shell_options"`
+
+	Output        io.Writer `yaml:"-"`
+	DiscardOutput bool      `yaml:"-"`
 }
 
-func Execute(opt ExecuteOptions) (string, error) {
-	if len(opt.Program) == 0 {
-		return "", errors.New("execute must provides at least 1 program value")
+var (
+	scriptTempDirectory string
+)
+
+func init() {
+	u, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+	scriptTempDirectory = filepath.Join(os.TempDir(), fmt.Sprintf("%s(%s)", u.Uid, u.Username))
+	if strings.HasPrefix(scriptTempDirectory, "-") {
+		panic(fmt.Sprintf("invalid scriptTempDirectory: %s", scriptTempDirectory))
+	}
+	err = os.MkdirAll(scriptTempDirectory, 0755)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (s *ScriptOption) SetupShell() error {
+	if s.Shell == "" {
+		f, err := exec.LookPath("bash")
+		if err != nil {
+			f, err = exec.LookPath("sh")
+			if err != nil {
+				return fmt.Errorf("can not find shell: bash or sh %w", err)
+			}
+		}
+		s.Shell = f
+		s.ShellOptions = []string{"-e"}
+		return nil
+	}
+	switch s.Shell {
+	case "bash", "sh":
+		if s.ShellOptions == nil {
+			s.ShellOptions = []string{"-e"}
+		}
+	}
+	f, err := exec.LookPath(s.Shell)
+	if err != nil {
+		return fmt.Errorf("can not find shell: %s %w", s.Shell, err)
+	}
+	s.Shell = f
+	return nil
+}
+
+const defaultRunShellOutputSize = 4096
+
+func NewShell(script string, opt *ScriptOption, args ...string) (*exec.Cmd, func(), error) {
+	if err := opt.SetupShell(); err != nil {
+		return nil, nil, err
+	}
+	hashsum := sha1.Sum([]byte(script))
+	scriptfile := filepath.Join(
+		scriptTempDirectory,
+		hex.EncodeToString(hashsum[:]),
+	)
+	if stat, err := os.Stat(scriptfile); err != nil || stat.IsDir() {
+		if err := os.WriteFile(scriptfile, []byte(script), 0750); err != nil {
+			return nil, nil, fmt.Errorf("write tmp script file %s: %w", scriptfile, err)
+		}
 	}
 	var t = opt.Timeout
 	if t == 0 {
 		t = time.Second * 60
 	}
+	cmds := make([]string, len(opt.ShellOptions)+1+len(args))
+	copy(cmds, opt.ShellOptions)
+	cmds[len(opt.ShellOptions)] = scriptfile
+	copy(cmds[len(opt.ShellOptions)+1:], args)
+
 	ctx, cancel := context.WithTimeout(context.Background(), t)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, opt.Program[0], opt.Program[1:]...)
-	var buf *RingBuffer
-	if opt.OutputSize > 0 {
-		buf = NewRingBuffer(opt.OutputSize)
+	cmd := exec.CommandContext(ctx, opt.Shell, cmds...)
+	if opt.DiscardOutput {
+		cmd.Stdout = nil
+		cmd.Stderr = nil
+	} else if opt.Output != nil {
+		cmd.Stdout = opt.Output
+		cmd.Stderr = cmd.Stdout
+	} else {
+		buf := NewRingBuffer(defaultRunShellOutputSize)
 		cmd.Stdout = buf
 		cmd.Stderr = cmd.Stdout
 	}
-	err := cmd.Start()
-	if err == nil {
-		err = cmd.Wait()
-	}
+	return cmd, cancel, nil
+}
+
+func RunShell(script string, opt *ScriptOption, args ...string) (string, error) {
+	cmd, cancel, err := NewShell(script, opt, args...)
+	defer cancel()
 	if err != nil {
-		if buf != nil {
-			return string(buf.Bytes()), fmt.Errorf("%w: args=%v", err, opt.Program)
+		return "", err
+	}
+	err = cmd.Run()
+	if err != nil {
+		return "", err
+	}
+	if os.Stdout != nil && cmd.Stderr == cmd.Stdout {
+		b, ok := cmd.Stdout.(*RingBuffer)
+		if ok {
+			return string(b.Bytes()), nil
 		}
-		return "", fmt.Errorf("%w: args=%v", err, opt.Program)
 	}
-	if buf == nil {
-		return "", nil
-	}
-	return string(buf.Bytes()), nil
+	return "", nil
 }
 
 type counterStats struct {
