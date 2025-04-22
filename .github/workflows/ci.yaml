@@ -19,7 +19,7 @@ jobs:
       - name: Build dist
         run: |
           bash -x ./release.sh
-          ./dist/go2jail-linux-amd64 -version
+          ./dist/go2jail-linux-amd64 --version
       - name: Archive artifacts
         uses: actions/upload-artifact@v4
         with:
