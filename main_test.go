@@ -13,6 +13,7 @@ import (
 )
 
 func makeTestConfig(t *testing.T, content string) string {
+	testSetStrictConfig(t)
 	t.Helper()
 	tpl, err := template.New(t.Name()).Parse(content)
 	require.NoError(t, err)
@@ -21,11 +22,11 @@ func makeTestConfig(t *testing.T, content string) string {
 	t.Cleanup(func() {
 		os.RemoveAll(dir)
 	})
-	p := writeTestNft(t, dir)
+	writeTestNft(t, dir)
 	var s strings.Builder
 	err = tpl.Execute(&s, map[string]string{
 		"dir":    dir,
-		"nftlog": p,
+		"nftlog": filepath.Join(dir, "nft.log"),
 		"Name":   t.Name(),
 	})
 	require.NoError(t, err)
@@ -35,14 +36,12 @@ func makeTestConfig(t *testing.T, content string) string {
 	return dir
 }
 
-func writeTestNft(t *testing.T, dir string) string {
+func writeTestNft(t *testing.T, dir string) {
 	t.Helper()
-	err := os.WriteFile(filepath.Join(dir, "nft"), []byte(`#!/bin/bash
-
-dir=$(dirname "$0")
-echo "dir: $dir"
-echo "$@" >>"$dir/nft.log"
-`), 0777)
+	nft := fmt.Sprintf(`#!/bin/bash
+	echo "$@" >>"%s/nft.log"
+	`, dir)
+	err := os.WriteFile(filepath.Join(dir, "nft"), []byte(nft), 0777)
 	require.NoError(t, err)
 	path := os.Getenv("PATH")
 	newpath := dir + ":" + path
@@ -51,10 +50,9 @@ echo "$@" >>"$dir/nft.log"
 	t.Cleanup(func() {
 		os.Setenv("PATH", path)
 	})
-	return filepath.Join(dir, "nft.log")
 }
 
-func testDisciplineLogAndReject(t *testing.T,
+func testRunServer(t *testing.T,
 	configContent, LinesContent, expect string) string {
 	t.Helper()
 	dir := makeTestConfig(t, configContent)
@@ -62,18 +60,17 @@ func testDisciplineLogAndReject(t *testing.T,
 	watchfile := filepath.Join(dir, "test.log")
 	err := os.WriteFile(watchfile, nil, 0777)
 	require.NoError(t, err)
-	flags := Flags{
-		ConfigDir: dir,
-		LogLevel:  "debug",
-	}
-	wait, stop, err := entry(&flags)
+	var opt runServerOption
+	opt.ConfigDir = dir
+	opt.LogLevel = "debug"
+	wait, stop, err := runServer(&opt)
 	require.NoError(t, err)
 
 	script := fmt.Sprintf(`#!/bin/bash
 cat >> %s <<'__EOF__'
 %s
 __EOF__
-	`, watchfile, LinesContent)
+    `, watchfile, LinesContent)
 	s, err := RunScript(
 		script,
 		&ScriptOption{},
@@ -84,6 +81,7 @@ __EOF__
 		if err == nil {
 			break
 		}
+		t.Logf("waiting for nft log: %s", err)
 		if os.IsNotExist(err) {
 			time.Sleep(time.Millisecond * 100)
 			continue
@@ -92,9 +90,11 @@ __EOF__
 		wait()
 		t.Fatal(err)
 	}
+	t.Log("stopping...")
 	stop()
+	t.Log("waiting...")
 	wait()
-
+	t.Log("read nft log")
 	b, err := os.ReadFile(nftlog)
 	require.NoError(t, err)
 	require.Equal(t, expect, string(b))
@@ -103,7 +103,7 @@ __EOF__
 
 func TestBasicLogAndNftReject(t *testing.T) {
 	cfg := `
-jail:
+jails:
   - id: '{{.Name}}'
     type: nftset
     sudo: false # run nft command without sudo
@@ -112,11 +112,14 @@ jail:
     table: filter # nft table name
     ipv4_set: ipv4_block_set # nft set name for ipv4
     ipv6_set: ipv6_block_set # nft set name for ipv6
-discipline:
+watches:
   - id: '{{.Name}}'
-    type: log
-    jail: ['{{.Name}}']
+    type: file
     files: [{{.dir}}/test.log]
+disciplines:
+  - id: '{{.Name}}'
+    jails: ['{{.Name}}']
+    watches: ['{{.Name}}']
     matches: '%(ip)'
     rate: 1/1s
 `
@@ -125,12 +128,12 @@ discipline:
 	expect := `add element inet filter ipv4_block_set { 1.1.1.1 }
 add element inet filter ipv4_block_set { 2.2.2.2 }
 `
-	testDisciplineLogAndReject(t, cfg, lines, expect)
+	testRunServer(t, cfg, lines, expect)
 }
 
 func TestLogDisciplineRateWorks(t *testing.T) {
 	cfg := `
-jail:
+jails:
   - id: '{{.Name}}'
     type: nftset
     sudo: false # run nft command without sudo
@@ -139,25 +142,28 @@ jail:
     table: filter # nft table name
     ipv4_set: ipv4_block_set # nft set name for ipv4
     ipv6_set: ipv6_block_set # nft set name for ipv6
-discipline:
+watches:
   - id: '{{.Name}}'
-    type: log
-    jail: ['{{.Name}}']
+    type: file
     files: [{{.dir}}/test.log]
-    matches: ['%(ip)']
-    rate: 2/10m
+disciplines:
+  - id: '{{.Name}}'
+    jails: ['{{.Name}}']
+    watches: ['{{.Name}}']
+    matches: '%(ip)'
+    rate: 2/m
 `
 	lines := `1.1.1.1
 1.1.1.1
 2.2.2.2`
 	expect := `add element inet filter ipv4_block_set { 1.1.1.1 }
 `
-	testDisciplineLogAndReject(t, cfg, lines, expect)
+	testRunServer(t, cfg, lines, expect)
 }
 
 func TestLogDisciplineIgnoreWorks(t *testing.T) {
 	cfg := `
-jail:
+jails:
   - id: '{{.Name}}'
     type: nftset
     sudo: false # run nft command without sudo
@@ -166,36 +172,42 @@ jail:
     table: filter # nft table name
     ipv4_set: ipv4_block_set # nft set name for ipv4
     ipv6_set: ipv6_block_set # nft set name for ipv6
-discipline:
+watches:
   - id: '{{.Name}}'
-    type: log
-    jail: ['{{.Name}}']
+    type: file
     files: [{{.dir}}/test.log]
-    matches: ['%(ip)']
+disciplines:
+  - id: '{{.Name}}'
+    jails: ['{{.Name}}']
+    watches: ['{{.Name}}']
+    matches: '%(ip)'
     ignores: '^1\.'
-    rate: 1/s
+    rate: 1/1s
 `
 	lines := `1.1.1.1
 1.1.1.1
 2.2.2.2`
 	expect := `add element inet filter ipv4_block_set { 2.2.2.2 }
 `
-	testDisciplineLogAndReject(t, cfg, lines, expect)
+	testRunServer(t, cfg, lines, expect)
 }
 
 func TestShellJailWorks(t *testing.T) {
 	cfg := `
-jail:
+jails:
   - id: '{{.Name}}'
     type: shell
     run: |
       nft "$@"
-discipline:
+watches:
   - id: '{{.Name}}'
-    type: log
-    jail: ['{{.Name}}']
+    type: file
     files: [{{.dir}}/test.log]
-    matches: ['%(ip)']
+disciplines:
+  - id: '{{.Name}}'
+    jails: ['{{.Name}}']
+    watches: ['{{.Name}}']
+    matches: '%(ip)'
     rate: 1/s
 `
 	lines := `1.1.1.1
@@ -205,20 +217,19 @@ discipline:
 1.1.1.1 1.1.1.1
 2.2.2.2 2.2.2.2
 `
-	testDisciplineLogAndReject(t, cfg, lines, expect)
+	testRunServer(t, cfg, lines, expect)
 }
 
 func TestShellDiscipline(t *testing.T) {
 	cfg := `
-jail:
+jails:
   - id: '{{.Name}}'
     type: shell
     run: |
       nft "$@"
-discipline:
+watches:
   - id: '{{.Name}}'
     type: shell
-    jail: ['{{.Name}}']
     run: |
       echo 3.3.3.3
       echo 3.3.3.4
@@ -226,7 +237,12 @@ discipline:
       echo 3.3.3.6
       exit 1
     restart_policy: 'on-success/10s'
-    matches: ['%(ip)']
+disciplines:
+  - id: '{{.Name}}'
+    jails: ['{{.Name}}']
+    watches: ['{{.Name}}']
+    matches: '%(ip)'
+    rate: 1/s
 `
 	lines := ``
 	expect := `3.3.3.3 3.3.3.3
@@ -234,19 +250,22 @@ discipline:
 3.3.3.5 3.3.3.5
 3.3.3.6 3.3.3.6
 `
-	testDisciplineLogAndReject(t, cfg, lines, expect)
+	testRunServer(t, cfg, lines, expect)
 }
 
 func TestTestingWorks(t *testing.T) {
 	dir := makeTestConfig(t, `
-jail:
+jails:
   - id: '{{.Name}}'
-    type: log
-discipline:
-  - id: test
-    type: 'log'
-    jail: ['{{.Name}}']
+    type: echo
+watches:
+  - id: '{{.Name}}'
+    type: file
     files: [{{.dir}}/test.log]
+disciplines:
+  - id: '{{.Name}}'
+    jails: ['{{.Name}}']
+    watches: ['{{.Name}}']
     matches: ['%(ip)']
     rate: 1/s
 `)
@@ -260,12 +279,10 @@ discipline:
 	})
 	var bs strings.Builder
 	Stdout = &bs
-	flags := Flags{
-		ConfigDir:      dir,
-		LogLevel:       "debug",
-		TestDiscipline: "test",
-	}
-	wait, _, err := entry(&flags)
+	var opt testDisciplineOption
+	opt.ConfigDir = dir
+	opt.LogLevel = "debug"
+	wait, _, err := runTestDiscipline(&opt, t.Name())
 	require.NoError(t, err)
 	wait()
 	require.Equal(t, `1.1.1.1 1.1.1.1
@@ -275,42 +292,47 @@ discipline:
 
 func TestFileNotExistsOK(t *testing.T) {
 	dir := makeTestConfig(t, `
-jail:
+jails:
   - id: '{{.Name}}'
     type: echo
-discipline:
+watches:
   - id: '{{.Name}}'
-    type: log
-    jail: ['{{.Name}}']
-    files: [{{.dir}}/absent.txt]
-    matches: ['%(ip)']
+    type: file
+    files: [{{.dir}}/absent.log]
     skip_when_file_not_exists: true
+disciplines:
+  - id: test
+    jails: ['{{.Name}}']
+    watches: ['{{.Name}}']
+    matches: ['%(ip)']
+    rate: 1/s
 `)
-	flags := Flags{
-		ConfigDir: dir,
-		LogLevel:  "debug",
-	}
-	wait, stop, err := entry(&flags)
+	var opt runServerOption
+	opt.ConfigDir = dir
+	opt.LogLevel = "debug"
+	wait, stop, err := runServer(&opt)
 	require.NoError(t, err)
 	stop()
 	wait()
 
 	dir = makeTestConfig(t, `
-jail:
+jails:
   - id: '{{.Name}}'
     type: echo
-discipline:
+watches:
   - id: '{{.Name}}'
-    type: log
-    jail: ['{{.Name}}']
-    files: [{{.dir}}/absent.txt]
+    type: file
+    files: [{{.dir}}/absent.log]
+disciplines:
+  - id: test
+    jails: ['{{.Name}}']
+    watches: ['{{.Name}}']
     matches: ['%(ip)']
+    rate: 1/s
 `)
-	flags = Flags{
-		ConfigDir: dir,
-		LogLevel:  "debug",
-	}
-	wait, stop, err = entry(&flags)
+	opt.ConfigDir = dir
+	opt.LogLevel = "debug"
+	wait, stop, err = runServer(&opt)
 	require.Error(t, err)
 	if stop != nil {
 		stop()

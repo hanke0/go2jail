@@ -1,4 +1,4 @@
-jail:
+jails:
   - id: nft
     type: nftset
     sudo: false
@@ -8,15 +8,19 @@ jail:
     ipv4_set: ipv4_block_set
     ipv6_set: ipv6_block_set
 
-#allow:
-#  - 1.1.1.1/32
+allows:
+  - 192.168.1.0/24
 
-discipline:
-  - id: sshd
-    type: log
-    jail: ['nft']
-    rate: 5/10m
+watches:
+  - id: nginx
+    type: file
     files:
       - /var/log/auth.log
+
+disciplines:
+  - id: nginx
+    jails: ["nft"]
+    watches: ["nginx"]
+    rate: 3/60m
     matches:
       - authentication\s+failure.+?rhost=%(ip)

@@ -5,19 +5,17 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
-
-	"github.com/goccy/go-yaml"
 )
 
 func init() {
 	RegisterJail("nftset", NewNftJail)
 	RegisterJail("echo", NewEchoJail)
-	RegisterJail("log", NewEchoJail)
+	RegisterJail("log", NewLogJail)
 	RegisterJail("shell", NewShellJail)
 }
 
 type NftJail struct {
-	ID            string `yaml:"id"`
+	BaseJail      `yaml:",inline"`
 	Sudo          bool   `yaml:"sudo"`
 	NftExecutable string `yaml:"nft_executable"`
 	Rule          string `yaml:"rule"`
@@ -29,9 +27,9 @@ type NftJail struct {
 	jailFailCounter    *Counter `yaml:"-"`
 }
 
-func NewNftJail(b []byte) (Jailer, error) {
+func NewNftJail(decode Decoder) (Jailer, error) {
 	var j NftJail
-	if err := yaml.Unmarshal(b, &j); err != nil {
+	if err := decode(&j); err != nil {
 		return nil, err
 	}
 	nft := j.NftExecutable
@@ -41,9 +39,6 @@ func NewNftJail(b []byte) (Jailer, error) {
 	p, err := exec.LookPath(nft)
 	if err != nil {
 		return nil, fmt.Errorf("can not find nft executable: %w", err)
-	}
-	if j.ID == "" {
-		j.ID = randomString(8)
 	}
 	j.NftExecutable = p
 	j.jailSuccessCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_success", j.ID))
@@ -87,10 +82,10 @@ func (nj *NftJail) Arrest(bad BadLog, log Logger) error {
 	cmd.Stderr = buf
 	err := cmd.Run()
 	if err != nil {
-		log.Errorf("[jail-nft][%s] arrest ip %s: err=%v, program=%v output=%s", nj.ID, s, err, program, buf.String())
+		log.Errorf("[jail-%s] arrest ip %s: err=%v, program=%v output=%s", nj.ID, s, err, program, buf.String())
 		nj.jailFailCounter.Incr()
 	} else {
-		log.Infof("[jail-nft][%s] arrest ip %s success", nj.ID, s)
+		log.Infof("[jail-%s] arrest ip %s success", nj.ID, s)
 		nj.jailSuccessCounter.Incr()
 	}
 	return err
@@ -101,17 +96,14 @@ func (nj *NftJail) Close() error {
 }
 
 type EchoJail struct {
-	ID                 string   `yaml:"id"`
+	BaseJail           `yaml:",inline"`
 	jailSuccessCounter *Counter `yaml:"-"`
 }
 
-func NewEchoJail(b []byte) (Jailer, error) {
+func NewEchoJail(decode Decoder) (Jailer, error) {
 	var j EchoJail
-	if err := yaml.Unmarshal(b, &j); err != nil {
+	if err := decode(&j); err != nil {
 		return nil, err
-	}
-	if j.ID == "" {
-		j.ID = randomString(8)
 	}
 	j.jailSuccessCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_success", j.ID))
 	return &j, nil
@@ -140,19 +132,16 @@ func (ej *EchoJail) Close() error {
 }
 
 type LogJail struct {
-	ID string `yaml:"id"`
+	BaseJail `yaml:",inline"`
 
 	jailSuccessCounter *Counter `yaml:"-"`
 }
 
-func NewLogJail(b []byte) (Jailer, error) {
+func NewLogJail(decode Decoder) (Jailer, error) {
 	var j LogJail
-	err := yaml.Unmarshal(b, &j)
+	err := decode(&j)
 	if err != nil {
 		return nil, err
-	}
-	if j.ID == "" {
-		j.ID = randomString(8)
 	}
 	j.jailSuccessCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_success", j.ID))
 	return &j, nil
@@ -169,7 +158,7 @@ func (ej *LogJail) Close() error {
 }
 
 type ShellJail struct {
-	ID           string `yaml:"id"`
+	BaseJail     `yaml:",inline"`
 	Run          string `yaml:"run"`
 	ScriptOption `yaml:",inline"`
 
@@ -177,16 +166,13 @@ type ShellJail struct {
 	jailFailCounter    *Counter `yaml:"-"`
 }
 
-func NewShellJail(b []byte) (Jailer, error) {
+func NewShellJail(decode Decoder) (Jailer, error) {
 	var j ShellJail
-	if err := yaml.Unmarshal(b, &j); err != nil {
+	if err := decode(&j); err != nil {
 		return nil, err
 	}
 	if err := j.ScriptOption.SetupShell(); err != nil {
 		return nil, err
-	}
-	if j.ID == "" {
-		j.ID = randomString(8)
 	}
 	j.jailSuccessCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_success", j.ID))
 	j.jailFailCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_fail", j.ID))

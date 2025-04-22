@@ -10,7 +10,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func testSetStrictConfig(t *testing.T) {
+	old := YAMLStrict
+	t.Cleanup(func() {
+		YAMLStrict = old
+	})
+	YAMLStrict = true
+}
+
 func TestParse(t *testing.T) {
+	testSetStrictConfig(t)
 	dir, err := os.MkdirTemp("", "*")
 	require.NoError(t, err)
 	os.Setenv("PATH", os.Getenv("PATH")+":"+dir)
@@ -21,14 +30,15 @@ func TestParse(t *testing.T) {
 	f.Close()
 	cfg, err := Parse("./testdata/config.yaml")
 	require.NoError(t, err)
-	require.Len(t, cfg.Jail, 1)
-	require.Len(t, cfg.Discipline, 1)
-	require.Len(t, cfg.Allow, 1)
-	require.Equal(t, "nft", cfg.Jail[0].ID)
-	require.Equal(t, "test", cfg.Discipline[0].ID)
-	require.True(t, cfg.AllowIP(net.IPv4(1, 1, 1, 1)))
-	require.False(t, cfg.AllowIP(net.IPv4(2, 2, 2, 2)))
-	require.False(t, cfg.AllowIP(net.IPv4(81, 6, 4, 1)))
+	require.Len(t, cfg.Jails, 1)
+	require.Len(t, cfg.Disciplines, 1)
+	require.Len(t, cfg.Allows, 1)
+	require.Len(t, cfg.Watches, 1)
+	require.Equal(t, "nft", cfg.Jails[0].ID)
+	require.Equal(t, "discipline", cfg.Disciplines[0].ID)
+	require.True(t, cfg.Allows.Contains(net.IPv4(1, 1, 1, 1)))
+	require.False(t, cfg.Allows.Contains(net.IPv4(2, 2, 2, 2)))
+	require.False(t, cfg.Allows.Contains(net.IPv4(81, 6, 4, 1)))
 
 	entries, err := os.ReadDir("./examples")
 	require.NoError(t, err)

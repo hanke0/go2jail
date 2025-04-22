@@ -2,7 +2,7 @@
 
 export CGO_ENABLED=0
 
-go vet ./... || exit 1
+go vet -printfuncs Debugf,Infof,Warningf,Errorf ./... || exit 1
 content=$(go fmt ./...)
 if [ -n "$content" ]; then
     echo "$content"

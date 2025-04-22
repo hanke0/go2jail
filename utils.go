@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"os"
 	"os/exec"
 	"os/user"
@@ -335,8 +334,12 @@ func (c *Limiter) Stop() {
 	if c == nil {
 		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.cancel != nil {
 		c.cancel()
+		c.cancel = nil
+		c.mp = nil
 	}
 	c.wg.Wait()
 }
@@ -429,25 +432,25 @@ func (c *Chan[T]) Reader() <-chan T {
 	return c.ch
 }
 
-type Cleaner struct {
+type Finisher struct {
 	cleans []func()
 }
 
-func (c *Cleaner) Prepend(f func()) {
+func (c *Finisher) Prepend(f func()) {
 	c.cleans = append([]func(){f}, c.cleans...)
 }
 
-func (c *Cleaner) Push(f func()) {
+func (c *Finisher) Push(f func()) {
 	c.cleans = append(c.cleans, f)
 }
 
-func (c *Cleaner) Clean() {
+func (c *Finisher) Finish() {
 	for i := len(c.cleans) - 1; i >= 0; i-- {
 		c.cleans[i]()
 	}
 }
 
-func (c *Cleaner) Len() int {
+func (c *Finisher) Len() int {
 	return len(c.cleans)
 }
 
@@ -498,22 +501,14 @@ func OutputCounters(w io.Writer) error {
 	return enc.Encode(data)
 }
 
-func randomString(n int) string {
-	b := make([]byte, n)
-	for i := range b {
-		b[i] = 'a' + byte(rand.Intn(26))
-	}
-	return string(b)
-}
-
 type Matcher struct {
-	regexes      []*regexp.Regexp
+	regexList    []*regexp.Regexp
 	expectGroups []int
 }
 
 func (m *Matcher) ExpectGroups(groups ...string) error {
 	for _, group := range groups {
-		for _, r := range m.regexes {
+		for _, r := range m.regexList {
 			gidx := -1
 			for i, name := range r.SubexpNames() {
 				if name == group {
@@ -538,7 +533,7 @@ var (
 
 func (m *Matcher) MarshalYAML() (any, error) {
 	var s []string
-	for _, r := range m.regexes {
+	for _, r := range m.regexList {
 		s = append(s, r.String())
 	}
 	return s, nil
@@ -558,7 +553,7 @@ func (m *Matcher) UnmarshalYAML(b []byte) error {
 		if err != nil {
 			return err
 		}
-		m.regexes = append(m.regexes, r)
+		m.regexList = append(m.regexList, r)
 	}
 	return nil
 }
@@ -568,7 +563,7 @@ func (m *Matcher) Test(s string) bool {
 }
 
 func (m *Matcher) Match(s string) []string {
-	for _, r := range m.regexes {
+	for _, r := range m.regexList {
 		match := r.FindStringSubmatch(s)
 		if len(match) > 0 {
 			var groups = []string{match[0]}
@@ -716,4 +711,44 @@ func (rp *RestartPolicy) Next(err error) bool {
 		return true
 	}
 	return false
+}
+
+type Strings []string
+
+func (s *Strings) UnmarshalYAML(b []byte) error {
+	var ss []string
+	if err := yaml.Unmarshal(b, &ss); err != nil {
+		return err
+	}
+	*s = ss
+	return nil
+}
+
+var YAMLStrict bool
+
+func YamlDecode(b []byte, v any) error {
+	if YAMLStrict {
+		return yaml.UnmarshalWithOptions(b, v, yaml.Strict())
+	}
+	return yaml.Unmarshal(b, v)
+}
+
+func YAMLDecodeFile(file string, v any) error {
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if YAMLStrict {
+		return yaml.NewDecoder(f, yaml.Strict()).Decode(v)
+	}
+	return yaml.NewDecoder(f).Decode(v)
+}
+
+type Decoder func(v any) error
+
+func NewYAMLDecoder(b []byte) Decoder {
+	return func(v any) error {
+		return YamlDecode(b, v)
+	}
 }

@@ -1,4 +1,4 @@
-jail:
+jails:
   - id: nft
     sudo: true
     nft_executable: nft
@@ -8,15 +8,20 @@ jail:
     ipv4_set: ipv4_block_set
     ipv6_set: ipv6_block_set
 
-allow:
+allows:
   - 1.1.1.1/32
 
-discipline:
-  - id: test
-    type: log
-    jail: ['nft']
-    rate: 10/5m
+watches:
+  - id: log
+    type: file
     files:
       - ./test.log
+
+disciplines:
+  - id: discipline
+    type: regex
+    watches: ["log"]
+    jails: ["nft"]
+    rate: 10/5m
     matches:
       - '%(ip)\s+\-\s+"[^"]+"\s+\[[^\]]+\]\s+"[^"]+"\s+"[^"]+"\s+(?<code>401|402|403)\s+'

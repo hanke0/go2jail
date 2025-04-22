@@ -1,4 +1,4 @@
-jail:
+jails:
   # NFTables Jail - Blocks IPs using Linux nftables sets
   # Requires nftables installed and proper permissions
   - id: nft
@@ -26,19 +26,29 @@ jail:
       ip="$1"  # Blocked IP passed as first parameter
       echo "Blocking IP: $ip"  # Example command - replace with actual blocking logic
 
-# IP Allow List - Bypass blocking for trusted IPs/CIDRs
+# IP Allow List for all disciplines - Bypass blocking for trusted IPs/CIDRs
 # Format: IPv4/IPv6 addresses with optional CIDR notation (e.g., 192.168.1.0/24)
-#allow:
-#  - 1.1.1.1/32    # Example: Allow specific IPv4
-#  - 2001:db8::/32 # Example: Allow IPv6 network
+allows:
+  - 192.168.1.0/24 # Example: Allow specific IPv4
+  - fd00::/8 # Example: Allow IPv6 network
+
+watches:
+  - id: log
+    # file type watch file changes, and handle line by line.
+    type: file
+    files:
+      - /var/log/auth.log # System authentication log file path
+    skip_when_file_not_exists: false # do not present an error when file not exits.
 
 # Security Discipline Configuration
 # Define attack patterns and response rules for monitored services
-discipline:
+disciplines:
   - id: sshd # Unique identifier for this security rule set
-    type: log # Input type (log file monitoring)
+    type: regex # regex match line.
+    # Watches to activate for blocking
+    watches: ["log"]
     # Jails to activate for blocking
-    jail: ['nft', 'echo', 'shell']
+    jails: ["nft", "echo", "shell"]
     # Rate limit: 5 events per 10 minutes triggers blocking.
     # Format: <count>/[interval]<unit>
     # Support Units: ms=milliseconds, s=seconds, m=minutes, h=hours, d=days
@@ -53,10 +63,6 @@ discipline:
     #   5/d (5 events per 1 day)
     rate: 5/10m
 
-    # Log monitoring configuration
-    files:
-      - /var/log/auth.log # System authentication log file path
-
     # Attack detection patterns (https://pkg.go.dev/regexp/syntax)
     # Must contain exactly one named capture group 'ip'.
     # Pattern notes:
@@ -70,3 +76,6 @@ discipline:
     ignores:
       - rhost=127\.0\.0\.1 # Ignore localhost connections
 
+    # allows ip for this discipline
+    allows:
+      - 192.168.1.0/24

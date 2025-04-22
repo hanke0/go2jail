@@ -1,4 +1,4 @@
-jail:
+jails:
   - id: nft
     type: nftset
     sudo: false
@@ -8,16 +8,20 @@ jail:
     ipv4_set: ipv4_block_set
     ipv6_set: ipv6_block_set
 
-#allow:
-#  - 1.1.1.1/32
+allows:
+  - 192.168.1.0/24
 
-discipline:
+watches:
   - id: nginx
-    type: log
-    jail: ['nft']
-    rate: 3/60m
+    type: file
     files:
       - /var/log/nginx/access.log
+
+disciplines:
+  - id: nginx
+    jails: ["nft"]
+    watches: ["nginx"]
+    rate: 3/60m
     matches:
       # $remote_addr - "$remote_user" [$time_iso8601] "$host" "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time
       - '%(ip)\s+\-\s+"[^"]+"\s+\[[^\]]+\]\s+"[^"]+"\s+"[^"]+"\s+(?<status>401|402|403)\s+'
