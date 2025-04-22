@@ -52,7 +52,7 @@ func writeTestNft(t *testing.T, dir string) {
 	})
 }
 
-func testRunServer(t *testing.T,
+func testRunDaemon(t *testing.T,
 	configContent, LinesContent, expect string) string {
 	t.Helper()
 	dir := makeTestConfig(t, configContent)
@@ -60,10 +60,10 @@ func testRunServer(t *testing.T,
 	watchfile := filepath.Join(dir, "test.log")
 	err := os.WriteFile(watchfile, nil, 0777)
 	require.NoError(t, err)
-	var opt runServerOption
+	var opt runDaemonOption
 	opt.ConfigDir = dir
 	opt.LogLevel = "debug"
-	wait, stop, err := runServer(&opt)
+	wait, stop, err := runDaemon(&opt)
 	require.NoError(t, err)
 
 	script := fmt.Sprintf(`#!/bin/bash
@@ -128,7 +128,7 @@ disciplines:
 	expect := `add element inet filter ipv4_block_set { 1.1.1.1 }
 add element inet filter ipv4_block_set { 2.2.2.2 }
 `
-	testRunServer(t, cfg, lines, expect)
+	testRunDaemon(t, cfg, lines, expect)
 }
 
 func TestLogDisciplineRateWorks(t *testing.T) {
@@ -158,7 +158,7 @@ disciplines:
 2.2.2.2`
 	expect := `add element inet filter ipv4_block_set { 1.1.1.1 }
 `
-	testRunServer(t, cfg, lines, expect)
+	testRunDaemon(t, cfg, lines, expect)
 }
 
 func TestLogDisciplineIgnoreWorks(t *testing.T) {
@@ -189,7 +189,7 @@ disciplines:
 2.2.2.2`
 	expect := `add element inet filter ipv4_block_set { 2.2.2.2 }
 `
-	testRunServer(t, cfg, lines, expect)
+	testRunDaemon(t, cfg, lines, expect)
 }
 
 func TestShellJailWorks(t *testing.T) {
@@ -217,7 +217,7 @@ disciplines:
 1.1.1.1 1.1.1.1
 2.2.2.2 2.2.2.2
 `
-	testRunServer(t, cfg, lines, expect)
+	testRunDaemon(t, cfg, lines, expect)
 }
 
 func TestShellDiscipline(t *testing.T) {
@@ -250,7 +250,7 @@ disciplines:
 3.3.3.5 3.3.3.5
 3.3.3.6 3.3.3.6
 `
-	testRunServer(t, cfg, lines, expect)
+	testRunDaemon(t, cfg, lines, expect)
 }
 
 func TestTestingWorks(t *testing.T) {
@@ -307,10 +307,10 @@ disciplines:
     matches: ['%(ip)']
     rate: 1/s
 `)
-	var opt runServerOption
+	var opt runDaemonOption
 	opt.ConfigDir = dir
 	opt.LogLevel = "debug"
-	wait, stop, err := runServer(&opt)
+	wait, stop, err := runDaemon(&opt)
 	require.NoError(t, err)
 	stop()
 	wait()
@@ -332,7 +332,7 @@ disciplines:
 `)
 	opt.ConfigDir = dir
 	opt.LogLevel = "debug"
-	wait, stop, err = runServer(&opt)
+	wait, stop, err = runDaemon(&opt)
 	require.Error(t, err)
 	if stop != nil {
 		stop()

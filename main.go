@@ -41,7 +41,7 @@ var (
 
 func init() {
 	commands = append(commands,
-		&runServerCommand,
+		&runDaemonCommand,
 		&testDisciplineCommand,
 		&testRegexCommand,
 	)
@@ -63,27 +63,30 @@ func init() {
 	}
 }
 
-type runServerOption struct {
+type runDaemonOption struct {
 	logFlags
 	configFlags
 	HTTPStatsListenAddr string
+
+	logger Logger
 }
 
-var runServerCommand = Command[runServerOption]{
+var runDaemonCommand = Command[runDaemonOption]{
 	Name:             "run",
 	ShortDescription: "run the daemon with specific config.",
-	Init: func(c *Command[runServerOption]) {
+	Init: func(c *Command[runDaemonOption]) {
 		c.Options.configFlags.init(&c.FlagSet)
 		c.Options.logFlags.init(&c.FlagSet)
 		c.FlagSet.StringVar(&c.Options.HTTPStatsListenAddr, "http-stats-listen-addr", "", "http stats listen address")
 	},
-	Run: func(c *Command[runServerOption]) error {
+	Run: func(c *Command[runDaemonOption]) error {
 		opt := &c.Options
-		wait, stop, err := runServer(opt)
+		wait, stop, err := runDaemon(opt)
 		if err != nil {
 			return err
 		}
 		waitAndHandleSignal(wait, stop)
+		c.Options.logger.Infof("daemon stopped")
 		return nil
 	},
 }
@@ -330,7 +333,7 @@ func waitAndHandleSignal(wait, stop func()) {
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		s := <-ch
-		log.Printf("receive signal %s, stopping...", s)
+		fmt.Fprintln(os.Stderr, "receive signal %s, stopping...", s)
 		stop()
 	}()
 	wait()
@@ -356,7 +359,7 @@ func parseLevel(s string) (int, error) {
 	}
 }
 
-func runServer(opt *runServerOption) (wait, stop func(), err error) {
+func runDaemon(opt *runDaemonOption) (wait, stop func(), err error) {
 	cfg, err := opt.configFlags.getConfig()
 	if err != nil {
 		return nil, nil, err
@@ -374,6 +377,8 @@ func runServer(opt *runServerOption) (wait, stop func(), err error) {
 		return nil, nil, err1
 	}
 	stops.Push(stop)
+	logger.Infof("daemon started")
+	opt.logger = logger
 	return wait, stops.Finish, nil
 }
 
