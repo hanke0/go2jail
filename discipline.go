@@ -32,11 +32,11 @@ func NewRegexDiscipline(decode Decoder) (Discipliner, error) {
 	}
 	id := rd.ID
 	if rd.Matches == nil {
-		return nil, fmt.Errorf("[discipline][%s] matches is nil", id)
+		return nil, fmt.Errorf("[discipline-%s] matches is nil", id)
 	}
 	if err := rd.Matches.ExpectGroups("ip"); err != nil {
 		v, _ := rd.Matches.MarshalYAML()
-		return nil, fmt.Errorf("[discipline][%s] bad matches: %w, %s", id, err, v)
+		return nil, fmt.Errorf("[discipline-%s] bad matches: %w, %s", id, err, v)
 	}
 	rd.tailLinesCount = RegisterNewCounter(fmt.Sprintf("%s_tail_lines", id))
 	rd.matchLineCount = RegisterNewCounter(fmt.Sprintf("%s_match_lines", id))

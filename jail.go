@@ -148,7 +148,7 @@ func NewLogJail(decode Decoder) (Jailer, error) {
 }
 
 func (ej *LogJail) Arrest(bad BadLog, log Logger) error {
-	log.Errorf("[jail-echo][%s] arrest ip %s", ej.ID, bad.IP)
+	log.Errorf("[jail-%s] arrest ip %s", ej.ID, bad.IP)
 	ej.jailSuccessCounter.Incr()
 	return nil
 }
@@ -182,10 +182,10 @@ func NewShellJail(decode Decoder) (Jailer, error) {
 func (sj *ShellJail) Arrest(bad BadLog, log Logger) error {
 	c, err := RunScript(sj.Run, &sj.ScriptOption, bad.IP.String(), bad.Line)
 	if err != nil {
-		log.Errorf("[jail-shell][%s] arrest ip %s fail: %v, %s", sj.ID, bad, err, c)
+		log.Errorf("[jail-%s] arrest ip %s fail: %v, %s", sj.ID, bad, err, c)
 		sj.jailFailCounter.Incr()
 	} else {
-		log.Infof("[jail-shell][%s] arrest ip %s success", sj.ID, bad.IP)
+		log.Infof("[jail-%s] arrest ip %s success", sj.ID, bad.IP)
 		sj.jailSuccessCounter.Incr()
 	}
 	return err

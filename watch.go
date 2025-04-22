@@ -36,7 +36,7 @@ func NewFileWatch(decode Decoder) (Watcher, error) {
 		return nil, err
 	}
 	if len(f.Files) == 0 {
-		return nil, fmt.Errorf("[watch][%s] files is empty", f.ID)
+		return nil, fmt.Errorf("[watch-%s] files is empty", f.ID)
 	}
 	var cancel func()
 	f.ctx, cancel = context.WithCancel(context.Background())
@@ -79,7 +79,7 @@ func (fd *FileWatch) Test(logger Logger) (<-chan Line, error) {
 }
 
 func (fd *FileWatch) watch(logger Logger, testing bool) (<-chan Line, error) {
-	logger.Debugf("[watch][%s] watch starting", fd.ID)
+	logger.Debugf("[watch-%s] watch starting", fd.ID)
 	ch := NewChan[Line](0)
 	fd.cancel.Push(ch.Close)
 	for _, f := range fd.Files {
@@ -106,22 +106,22 @@ func (fd *FileWatch) watch(logger Logger, testing bool) (<-chan Line, error) {
 				t.Stop()
 				t.Cleanup()
 			}()
-			logger.Debugf("[watch][%s] watch file: %s", fd.ID, f)
+			logger.Debugf("[watch-%s] watch file: %s", fd.ID, f)
 			for {
 				select {
 				case <-fd.ctx.Done():
-					logger.Infof("[watch][%s] file closed: %s", fd.ID, f)
+					logger.Infof("[watch-%s] file closed: %s", fd.ID, f)
 					return
 				case line, ok := <-t.Lines:
 					if !ok {
-						logger.Infof("[watch][%s] file closed: %s", fd.ID, f)
+						logger.Infof("[watch-%s] file closed: %s", fd.ID, f)
 						return
 					}
 					if line.Err != nil {
-						logger.Errorf("[watch][%s] tail file fail %s: %v", fd.ID, f, line.Err)
+						logger.Errorf("[watch-%s] tail file fail %s: %v", fd.ID, f, line.Err)
 						return
 					}
-					logger.Debugf("[watch][%s] get line from %s: length=%d", fd.ID, f, len(line.Text))
+					logger.Debugf("[watch-%s] get line from %s: length=%d", fd.ID, f, len(line.Text))
 					l := NewLine(fd.ID, line.Text)
 					if err := ch.Send(l); err != nil {
 						return
@@ -157,10 +157,10 @@ func NewShellWatch(decode Decoder) (Watcher, error) {
 		return nil, err
 	}
 	if s.RestartPolicy == nil {
-		return nil, fmt.Errorf("[watch][%s] restart_policy is nil", s.ID)
+		return nil, fmt.Errorf("[watch-%s] restart_policy is nil", s.ID)
 	}
 	if err := s.ScriptOption.SetupShell(); err != nil {
-		return nil, fmt.Errorf("[watch][%s] setup shell fail: %w", s.ID, err)
+		return nil, fmt.Errorf("[watch-%s] setup shell fail: %w", s.ID, err)
 	}
 	s.ch = NewChan[string](0)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
@@ -174,7 +174,7 @@ func (sd *ShellWatch) Test(logger Logger) (<-chan Line, error) {
 }
 
 func (sd *ShellWatch) Watch(logger Logger) (<-chan Line, error) {
-	logger.Infof("[watch][%s] watch starting", sd.ID)
+	logger.Infof("[watch-%s] watch starting", sd.ID)
 	sd.RestartPolicy.Next(nil)
 	cmd, cancel, err := sd.execute(logger)
 	if err != nil {
@@ -188,27 +188,27 @@ func (sd *ShellWatch) Watch(logger Logger) (<-chan Line, error) {
 			sd.wg.Done()
 		}()
 		waitExit := func() error {
-			logger.Debugf("[watch][%s] waiting exec exit", sd.ID)
+			logger.Debugf("[watch-%s] waiting exec exit", sd.ID)
 			err := cmd.Wait()
 			cancel()
-			logger.Debugf("[watch][%s] exec exit with error: %v", sd.ID, err)
+			logger.Debugf("[watch-%s] exec exit with error: %v", sd.ID, err)
 			return err
 		}
 		exeErr := waitExit()
 		for sd.RestartPolicy.Next(exeErr) {
-			logger.Debugf("[watch][%s] exec restart: exiterr=%v", sd.ID, exeErr)
+			logger.Debugf("[watch-%s] exec restart: exiterr=%v", sd.ID, exeErr)
 			cmd, cancel, exeErr = sd.execute(logger)
 			if exeErr == nil {
 				exeErr = waitExit()
 			}
 			select {
 			case <-sd.ctx.Done():
-				logger.Infof("[watch][%s] exec exit by context done", sd.ID)
+				logger.Infof("[watch-%s] exec exit by context done", sd.ID)
 				return
 			default:
 			}
 		}
-		logger.Infof("[watch][%s] exec exit by restart_policy: exiterr=%v", sd.ID, exeErr)
+		logger.Infof("[watch-%s] exec exit by restart_policy: exiterr=%v", sd.ID, exeErr)
 	}()
 	ch := NewChan[Line](0)
 	sd.wg.Add(1)
@@ -221,11 +221,11 @@ func (sd *ShellWatch) Watch(logger Logger) (<-chan Line, error) {
 		for {
 			select {
 			case <-sd.ctx.Done():
-				logger.Infof("[watch][%s] close watch context done", sd.ID)
+				logger.Infof("[watch-%s] close watch context done", sd.ID)
 				return
 			case line, ok := <-rd:
 				if !ok {
-					logger.Infof("[watch][%s] close watch channel closed", sd.ID)
+					logger.Infof("[watch-%s] close watch channel closed", sd.ID)
 					return
 				}
 				l := NewLine(sd.ID, line)
@@ -236,7 +236,7 @@ func (sd *ShellWatch) Watch(logger Logger) (<-chan Line, error) {
 			}
 		}
 	}()
-	logger.Infof("[watch][%s] watch started", sd.ID)
+	logger.Infof("[watch-%s] watch started", sd.ID)
 	return ch.Reader(), nil
 }
 
@@ -250,12 +250,12 @@ func (sd *ShellWatch) execute(logger Logger) (cmd *exec.Cmd, cancel func(), err 
 	}
 	cmd, cancelCtx, err := NewScript(sd.Run, opt, sd.ID)
 	if err != nil {
-		logger.Errorf("[watch][%s] new shell script fail: %v", sd.ID, err)
+		logger.Errorf("[watch-%s] new shell script fail: %v", sd.ID, err)
 		return nil, nil, err
 	}
 	if err := cmd.Start(); err != nil {
 		cancelCtx()
-		logger.Errorf("[watch][%s] start shell script fail: %v", sd.ID, err)
+		logger.Errorf("[watch-%s] start shell script fail: %v", sd.ID, err)
 		return nil, nil, err
 	}
 	return cmd, func() {

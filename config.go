@@ -187,7 +187,7 @@ func Parse(files ...string) (*Config, error) {
 			if !slices.ContainsFunc(cfg.Watches, func(w *Watch) bool {
 				return w.ID == id
 			}) {
-				return nil, fmt.Errorf("[discipline][%s] watch %s not found", d.ID, id)
+				return nil, fmt.Errorf("[discipline-%s] watch %s not found", d.ID, id)
 			}
 		}
 		for _, id := range d.Jails {
@@ -195,7 +195,7 @@ func Parse(files ...string) (*Config, error) {
 				cfg.Jails,
 				func(j *Jail) bool { return j.ID == id },
 			) {
-				return nil, fmt.Errorf("[discipline][%s] jail %s not found", d.ID, id)
+				return nil, fmt.Errorf("[discipline-%s] jail %s not found", d.ID, id)
 			}
 		}
 	}
