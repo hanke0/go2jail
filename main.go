@@ -333,7 +333,7 @@ func waitAndHandleSignal(wait, stop func()) {
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		s := <-ch
-		fmt.Fprintln(os.Stderr, "receive signal %s, stopping...", s)
+		fmt.Fprintf(os.Stderr, "receive signal %s, stopping...\n", s)
 		stop()
 	}()
 	wait()
