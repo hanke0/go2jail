@@ -101,6 +101,6 @@ func (rd *RegexDiscipline) Judge(line Line, allow Allows, logger Logger) (bad Ba
 		return bad, true
 	}
 	rd.watchIPCount.Incr()
-	logger.Infof("[discipline-%s] arrest(%s): %s %s", rd.ID, desc, sip, line)
+	logger.Infof("[discipline-%s] watch-on(%s): %s %s", rd.ID, desc, sip, line)
 	return bad, false
 }
