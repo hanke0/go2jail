@@ -114,6 +114,24 @@ var testDisciplineCommand = Command[testDisciplineOption]{
 	},
 }
 
+type testConfigOptions struct {
+	configFlags
+}
+
+var testConfigCommand = Command[testConfigOptions]{
+	Name:             "test-config",
+	ShortDescription: "test you config.",
+	Init: func(c *Command[testConfigOptions]) {
+		opt := &c.Options
+		flag := &c.FlagSet
+		opt.configFlags.init(flag)
+	},
+	Run: func(c *Command[testConfigOptions]) error {
+		_, err := c.Options.configFlags.getConfig()
+		return err
+	},
+}
+
 type testRegexOptions struct {
 	TestRegexMatch  Multi
 	TestRegexIgnore Multi

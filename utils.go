@@ -718,7 +718,11 @@ type Strings []string
 func (s *Strings) UnmarshalYAML(b []byte) error {
 	var ss []string
 	if err := yaml.Unmarshal(b, &ss); err != nil {
-		return err
+		var s string
+		if err1 := yaml.Unmarshal(b, &s); err1 != nil {
+			return err
+		}
+		ss = []string{s}
 	}
 	*s = ss
 	return nil

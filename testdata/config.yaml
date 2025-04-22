@@ -25,3 +25,8 @@ disciplines:
     rate: 10/5m
     matches:
       - '%(ip)\s+\-\s+"[^"]+"\s+\[[^\]]+\]\s+"[^"]+"\s+"[^"]+"\s+(?<code>401|402|403)\s+'
+  - id: discipline1
+    watches: log
+    jails: nft
+    matches:
+      - '%(ip)\s+\-\s+"[^"]+"\s+\[[^\]]+\]\s+"[^"]+"\s+"[^"]+"\s+(?<code>401|402|403)\s+'
