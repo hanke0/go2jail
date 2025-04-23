@@ -71,12 +71,12 @@ func (rd *RegexDiscipline) Judge(line Line, allow Allows, logger Logger) (bad Ba
 	rd.tailLinesCount.Incr()
 	groups := rd.Matches.Match(line.Text)
 	if len(groups) == 0 {
-		logger.Debugf("[discipline-%s] regex not match: length=%d", rd.ID, len(line.Text))
+		logger.Debugf("[discipline-%s][watch-%s] regex not match: length=%d", rd.ID, line.WatchID, len(line.Text))
 		ok = false
 		return
 	}
 	if rd.Ignores != nil && rd.Ignores.Test(groups[0]) {
-		logger.Debugf("[discipline-%s] regex ignore: length=%d", rd.ID, len(line.Text))
+		logger.Debugf("[discipline-%s][watch-%s] regex ignore: length=%d", rd.ID, line.WatchID, len(line.Text))
 		ok = false
 		return
 	}
@@ -96,11 +96,11 @@ func (rd *RegexDiscipline) Judge(line Line, allow Allows, logger Logger) (bad Ba
 	desc, ok := rd.Rate.Add(sip)
 	if ok {
 		rd.sendJailSuccessCount.Incr()
-		logger.Infof("[discipline-%s] arrest(%s): %s %s", rd.ID, desc, sip, line.Text)
+		logger.Infof("[discipline-%s][watch-%s] arrest(%s): %s %s", rd.ID, line.WatchID, desc, sip, line.Text)
 		bad = NewBadLog(line, rd.ID, ip)
 		return bad, true
 	}
 	rd.watchIPCount.Incr()
-	logger.Infof("[discipline-%s] watch-on(%s): %s %s", rd.ID, desc, sip, line)
+	logger.Infof("[discipline-%s][watch-%s] watch-on(%s): %s %s", rd.ID, line.WatchID, desc, sip, line.Text)
 	return bad, false
 }
