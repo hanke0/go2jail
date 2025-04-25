@@ -148,7 +148,7 @@ func NewLogJail(decode Decoder) (Jailer, error) {
 }
 
 func (ej *LogJail) Arrest(bad BadLog, log Logger) error {
-	log.Errorf("[jail-%s] arrest ip %s", ej.ID, bad.IP)
+	log.Errorf("[jail-%s] arrest ip %s, groups=%s", ej.ID, bad.IP, bad.Extend.String())
 	ej.jailSuccessCounter.Incr()
 	return nil
 }
@@ -157,10 +157,13 @@ func (ej *LogJail) Close() error {
 	return nil
 }
 
+type Options struct {
+}
+
 type ShellJail struct {
-	BaseJail     `yaml:",inline"`
-	Run          string `yaml:"run"`
-	ScriptOption `yaml:",inline"`
+	BaseJail         `yaml:",inline"`
+	Run              string `yaml:"run"`
+	YAMLScriptOption `yaml:",inline"`
 
 	jailSuccessCounter *Counter `yaml:"-"`
 	jailFailCounter    *Counter `yaml:"-"`
@@ -171,7 +174,7 @@ func NewShellJail(decode Decoder) (Jailer, error) {
 	if err := decode(&j); err != nil {
 		return nil, err
 	}
-	if err := j.ScriptOption.SetupShell(); err != nil {
+	if err := j.YAMLScriptOption.SetupShell(); err != nil {
 		return nil, err
 	}
 	j.jailSuccessCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_success", j.ID))
@@ -180,7 +183,11 @@ func NewShellJail(decode Decoder) (Jailer, error) {
 }
 
 func (sj *ShellJail) Arrest(bad BadLog, log Logger) error {
-	c, err := RunScript(sj.Run, &sj.ScriptOption, bad.IP.String(), bad.Line)
+	opt := ScriptOption{
+		YAMLScriptOption: sj.YAMLScriptOption,
+		Env:              bad.Extend.AsEnv(),
+	}
+	c, err := RunScript(sj.Run, &opt, bad.IP.String(), bad.Line)
 	if err != nil {
 		log.Errorf("[jail-%s] arrest ip %s fail: %v, %s", sj.ID, bad.IP, err, c)
 		sj.jailFailCounter.Incr()

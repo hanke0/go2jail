@@ -15,6 +15,8 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,14 +71,20 @@ func (r *RingBuffer) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-type ScriptOption struct {
+type YAMLScriptOption struct {
 	Timeout      time.Duration `yaml:"timeout,omitempty"`
 	Shell        string        `yaml:"shell,omitempty"`
 	ShellOptions []string      `yaml:"shell_options,omitempty"`
+	ShellOutput  string        `yaml:"shell_output,omitempty"`
+	RunUser      string        `yaml:"run_user,omitempty"`
+	RunGroup     string        `yaml:"run_group,omitempty"`
+}
 
-	Stdout        io.Writer `yaml:"-"`
-	Stderr        io.Writer `yaml:"-"`
-	DiscardOutput bool      `yaml:"-"`
+type ScriptOption struct {
+	YAMLScriptOption `yaml:"-"`
+
+	ForceOutput io.Writer `yaml:"-"`
+	Env         []string  `yaml:"-"`
 }
 
 var (
@@ -98,7 +106,7 @@ func init() {
 	}
 }
 
-func (s *ScriptOption) SetupShell() error {
+func (s *YAMLScriptOption) SetupShell() error {
 	if s.Shell == "" {
 		f, err := exec.LookPath("bash")
 		if err != nil {
@@ -126,6 +134,11 @@ func (s *ScriptOption) SetupShell() error {
 }
 
 const defaultScriptOutputSize = 4096
+
+var setCmdUserAndGroup = func(cmd *exec.Cmd, user, group string) error {
+	fmt.Fprintf(os.Stderr, "change run user is not supported in platform: %s\n", runtime.GOOS)
+	return nil
+}
 
 func NewScript(script string, opt *ScriptOption, args ...string) (*exec.Cmd, func(), error) {
 	if err := opt.SetupShell(); err != nil {
@@ -159,19 +172,56 @@ func NewScript(script string, opt *ScriptOption, args ...string) (*exec.Cmd, fun
 	} else {
 		ctx, cancel = context.WithCancel(context.Background())
 	}
+	var cleaner Finisher
+	cleaner.Push(cancel)
 	cmd := exec.CommandContext(ctx, opt.Shell, cmds...)
-	if opt.DiscardOutput {
+	cmd.Dir = os.TempDir()
+	if opt.RunUser != "" {
+		if err := setCmdUserAndGroup(cmd, opt.RunUser, opt.RunGroup); err != nil {
+			cleaner.Finish()
+			return nil, nil, err
+		}
+	}
+	switch {
+	case opt.ForceOutput != nil:
+		cmd.Stdout = opt.ForceOutput
+		cmd.Stderr = opt.ForceOutput
+	case opt.ShellOutput == "/dev/null":
 		cmd.Stdout = nil
 		cmd.Stderr = nil
-	} else if opt.Stdout != nil || opt.Stderr != nil {
-		cmd.Stdout = opt.Stdout
-		cmd.Stderr = opt.Stderr
-	} else {
+	case opt.ShellOutput != "":
+		f, err := os.OpenFile(opt.ShellOutput, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0640)
+		if err != nil {
+			cleaner.Finish()
+			return nil, nil, fmt.Errorf("open shell output file %s: %w", opt.ShellOutput, err)
+		}
+		cmd.Stdout = f
+		cmd.Stderr = f
+		cleaner.Push(func() {
+			f.Close()
+		})
+	default:
 		buf := NewRingBuffer(defaultScriptOutputSize)
 		cmd.Stdout = buf
 		cmd.Stderr = cmd.Stdout
 	}
-	return cmd, cancel, nil
+	cmd.Env = slices.Clone(opt.Env)
+	for _, name := range inheritEnv {
+		if !slices.ContainsFunc(cmd.Env, func(e string) bool {
+			return strings.HasPrefix(e, name+"=")
+		}) {
+			v, ok := os.LookupEnv(name)
+			if ok {
+				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", name, v))
+			}
+		}
+	}
+	return cmd, cleaner.Finish, nil
+}
+
+var inheritEnv = []string{
+	"TZ", "PATH", "HOME", "LANG",
+	"LC_COLLATE", "LC_CTYPE", "LC_MONETARY", "LC_MESSAGES", "LC_NUMERIC", "LC_TIME", "LC_ALL",
 }
 
 func RunScript(script string, opt *ScriptOption, args ...string) (string, error) {
@@ -182,7 +232,7 @@ func RunScript(script string, opt *ScriptOption, args ...string) (string, error)
 	}
 	err = cmd.Run()
 	var out string
-	if os.Stdout != nil && cmd.Stderr == cmd.Stdout {
+	if os.Stdout != nil {
 		b, ok := cmd.Stdout.(*RingBuffer)
 		if ok {
 			out = b.String()
@@ -502,8 +552,7 @@ func OutputCounters(w io.Writer) error {
 }
 
 type Matcher struct {
-	regexList    []*regexp.Regexp
-	expectGroups []int
+	regexList []*regexp.Regexp
 }
 
 func (m *Matcher) ExpectGroups(groups ...string) error {
@@ -519,7 +568,6 @@ func (m *Matcher) ExpectGroups(groups ...string) error {
 			if gidx < 0 {
 				return fmt.Errorf("regex group %q must exists", group)
 			}
-			m.expectGroups = append(m.expectGroups, gidx)
 		}
 	}
 	return nil
@@ -562,16 +610,19 @@ func (m *Matcher) Test(s string) bool {
 	return len(m.Match(s)) > 0
 }
 
-func (m *Matcher) Match(s string) []string {
+func (m *Matcher) Match(s string) KeyValueList {
 	for _, r := range m.regexList {
 		match := r.FindStringSubmatch(s)
 		if len(match) > 0 {
-			var groups = []string{match[0]}
-			for _, idx := range m.expectGroups {
-				if len(match) <= idx {
+			var groups = KeyValueList{{Value: match[0]}}
+			for i, name := range r.SubexpNames() {
+				if name == "" {
 					continue
 				}
-				groups = append(groups, match[idx])
+				groups = append(groups, KeyValue{
+					Key:   name,
+					Value: match[i],
+				})
 			}
 			return groups
 		}

@@ -75,14 +75,15 @@ func (rd *RegexDiscipline) Judge(line Line, allow Allows, logger Logger) (bad Ba
 		ok = false
 		return
 	}
-	if rd.Ignores != nil && rd.Ignores.Test(groups[0]) {
+	if rd.Ignores != nil && rd.Ignores.Test(groups[0].Value) {
 		logger.Debugf("[discipline-%s][watch-%s] regex ignore: length=%d", rd.ID, line.WatchID, len(line.Text))
 		ok = false
 		return
 	}
 	rd.matchLineCount.Incr()
-	ip := net.ParseIP(groups[1])
+	ip := net.ParseIP(groups.Get("ip"))
 	if ip == nil {
+		logger.Debugf("[discipline-%s][watch-%s] no ip group: %s", rd.ID, line.WatchID, groups)
 		rd.badIPLineCount.Incr()
 		ok = false
 		return
@@ -97,7 +98,7 @@ func (rd *RegexDiscipline) Judge(line Line, allow Allows, logger Logger) (bad Ba
 	if ok {
 		rd.sendJailSuccessCount.Incr()
 		logger.Infof("[discipline-%s][watch-%s] arrest(%s): %s %s", rd.ID, line.WatchID, desc, sip, line.Text)
-		bad = NewBadLog(line, rd.ID, ip)
+		bad = NewBadLog(line, rd.ID, ip, groups...)
 		return bad, true
 	}
 	rd.watchIPCount.Incr()

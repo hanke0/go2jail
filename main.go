@@ -445,9 +445,9 @@ func runTestRegex(flags *testRegexOptions, file string) error {
 		line := scan.Text()
 		g := match.Match(line)
 		if len(g) > 0 && !ignores.Test(line) {
-			fmt.Println("MATCH:"+g[1], "\tLine:", line)
+			fmt.Println("MATCH\t" + g.String())
 		} else {
-			fmt.Println("MISS:\tLine:", line)
+			fmt.Println("MISS:\t", line)
 		}
 	}
 	return scan.Err()

@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 )
@@ -80,19 +82,63 @@ func (j *Watch) UnmarshalYAML(b []byte) error {
 	return nil
 }
 
+type KeyValue struct {
+	Key   string
+	Value string
+}
+
+type KeyValueList []KeyValue
+
+func (k KeyValueList) Get(key string) string {
+	for _, kv := range k {
+		if kv.Key == key {
+			return kv.Value
+		}
+	}
+	return ""
+}
+
+var envRegex = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
+
+func (k KeyValueList) AsEnv() []string {
+	var ss []string
+	for _, v := range k {
+		k := envRegex.ReplaceAllString(v.Key, "_")
+		ss = append(ss, fmt.Sprintf(
+			"GO2JAIL_%s=%s", k, v.Value,
+		))
+	}
+	return ss
+}
+
+func (k KeyValueList) String() string {
+	var bs strings.Builder
+	for _, v := range k {
+		if bs.Len() > 0 {
+			bs.WriteByte('\t')
+		}
+		bs.WriteString(v.Key)
+		bs.WriteByte('=')
+		bs.WriteString(v.Value)
+	}
+	return bs.String()
+}
+
 type BadLog struct {
 	Line         string
 	WatchID      string
 	DisciplineID string
 	IP           net.IP
+	Extend       KeyValueList
 }
 
-func NewBadLog(line Line, disciplineID string, ip net.IP) BadLog {
+func NewBadLog(line Line, disciplineID string, ip net.IP, extend ...KeyValue) BadLog {
 	return BadLog{
 		Line:         line.Text,
 		WatchID:      line.WatchID,
 		DisciplineID: disciplineID,
 		IP:           ip,
+		Extend:       extend,
 	}
 }
 

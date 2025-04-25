@@ -241,13 +241,12 @@ func (sd *ShellWatch) Watch(logger Logger) (<-chan Line, error) {
 }
 
 func (sd *ShellWatch) execute(logger Logger) (cmd *exec.Cmd, cancel func(), err error) {
+	w := ChanWriter(sd.ch)
 	opt := &ScriptOption{
-		Shell:        sd.ScriptOption.Shell,
-		ShellOptions: sd.ScriptOption.ShellOptions,
-		Timeout:      -1,
-		Stdout:       ChanWriter(sd.ch),
-		Stderr:       ChanWriter(sd.ch),
+		YAMLScriptOption: sd.YAMLScriptOption,
+		ForceOutput:      w,
 	}
+	opt.Timeout = -1
 	cmd, cancelCtx, err := NewScript(sd.Run, opt, sd.ID)
 	if err != nil {
 		logger.Errorf("[watch-%s] new shell script fail: %v", sd.ID, err)
@@ -260,8 +259,7 @@ func (sd *ShellWatch) execute(logger Logger) (cmd *exec.Cmd, cancel func(), err 
 	}
 	return cmd, func() {
 		cancelCtx()
-		cmd.Stdout.(io.Closer).Close()
-		cmd.Stderr.(io.Closer).Close()
+		w.Close()
 	}, nil
 }
 

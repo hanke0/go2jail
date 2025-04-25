@@ -220,6 +220,34 @@ disciplines:
 	testRunDaemon(t, cfg, lines, expect)
 }
 
+func TestShellEnvGroup(t *testing.T) {
+	cfg := `
+jails:
+  - id: '{{.Name}}'
+    type: shell
+    run: |
+      env | grep ^GO2JAIL | xargs nft "$1"
+watches:
+  - id: '{{.Name}}'
+    type: file
+    files: [{{.dir}}/test.log]
+disciplines:
+  - id: '{{.Name}}'
+    jails: ['{{.Name}}']
+    watches: ['{{.Name}}']
+    matches: '%(ip) (?P<user>.+)'
+    rate: 1/s
+`
+	lines := `1.1.1.1 user1
+1.1.1.1 user2
+2.2.2.2 user3`
+	expect := `1.1.1.1 GO2JAIL_ip=1.1.1.1 GO2JAIL_=1.1.1.1 user1 GO2JAIL_user=user1
+1.1.1.1 GO2JAIL_ip=1.1.1.1 GO2JAIL_=1.1.1.1 user2 GO2JAIL_user=user2
+2.2.2.2 GO2JAIL_ip=2.2.2.2 GO2JAIL_=2.2.2.2 user3 GO2JAIL_user=user3
+`
+	testRunDaemon(t, cfg, lines, expect)
+}
+
 func TestShellDiscipline(t *testing.T) {
 	cfg := `
 jails:
