@@ -150,8 +150,9 @@ func NewBadLog(line Line, disciplineID string, ip net.IP, extend ...KeyValue) Ba
 }
 
 type BaseJail struct {
-	ID   string `yaml:"id"`
-	Type string `yaml:"type"`
+	ID         string `yaml:"id"`
+	Type       string `yaml:"type"`
+	Background bool   `yaml:"background"`
 }
 
 type Jail struct {

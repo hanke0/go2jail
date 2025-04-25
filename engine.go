@@ -21,15 +21,24 @@ func (w watchCallback) Exec(line Line, allow Allows, logger Logger) {
 	ip := bad.IP
 	logger.Debugf("[engine][discipline-%s][watch-%s] bad ip: %s %s", bad.DisciplineID, bad.WatchID, ip, bad.Line)
 	for _, j := range w.js {
-		logger.Debugf("[engine][discipline-%s][watch-%s][jail-%s] start arrest %s by line: %s", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.Line)
-		err := j.Action.Arrest(bad, logger)
-		if err != nil {
-			logger.Errorf("[engine][discipline-%s][watch-%s][jail-%s] arrest %s by line: %s fail: %v", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.Line, err)
-			CountArrestFail.Incr()
+		if j.Background {
+			go runJail(bad, j, logger)
 		} else {
-			logger.Infof("[engine][discipline-%s][watch-%s][jail-%s] arrest success: %s", bad.DisciplineID, bad.WatchID, j.ID, ip)
-			CountArrestSuccess.Incr()
+			runJail(bad, j, logger)
 		}
+	}
+}
+
+func runJail(bad BadLog, j *Jail, logger Logger) {
+	ip := bad.IP
+	logger.Debugf("[engine][discipline-%s][watch-%s][jail-%s] start arrest %s by line: %s", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.Line)
+	err := j.Action.Arrest(bad, logger)
+	if err != nil {
+		logger.Errorf("[engine][discipline-%s][watch-%s][jail-%s] arrest %s by line: %s fail: %v", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.Line, err)
+		CountArrestFail.Incr()
+	} else {
+		logger.Infof("[engine][discipline-%s][watch-%s][jail-%s] arrest success: %s", bad.DisciplineID, bad.WatchID, j.ID, ip)
+		CountArrestSuccess.Incr()
 	}
 }
 

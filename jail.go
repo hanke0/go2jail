@@ -179,7 +179,6 @@ type ShellJail struct {
 	BaseJail         `yaml:",inline"`
 	Run              string `yaml:"run"`
 	YAMLScriptOption `yaml:",inline"`
-	Background       bool `yaml:"background"`
 
 	jailSuccessCounter *Counter `yaml:"-"`
 	jailFailCounter    *Counter `yaml:"-"`
@@ -203,35 +202,13 @@ func (sj *ShellJail) Arrest(bad BadLog, log Logger) error {
 		YAMLScriptOption: sj.YAMLScriptOption,
 		Env:              bad.Extend.AsEnv(),
 	}
-	cmd, cancel, err := NewScript(sj.Run, &opt, bad.IP.String(), bad.Line)
+	out, err := RunScript(sj.Run, &opt, bad.IP.String(), bad.Line)
 	if err != nil {
-		sj.jailFailCounter.Incr()
-		return err
-	}
-
-	if sj.Background {
-		go func(bad BadLog, log Logger) {
-			if out, err := RunCmd(cmd, cancel); err != nil {
-				log.Errorf(
-					"[discipline-%s][watch-%s][jail-%s] arrest %s by line: %s fail: %v, output=%s",
-					bad.DisciplineID, bad.WatchID, sj.ID, bad.IP, bad.Line, err, out,
-				)
-				sj.jailFailCounter.Incr()
-			} else {
-				log.Infof(
-					"[discipline-%s][watch-%s][jail-%s] arrest %s by line: %s success",
-					bad.DisciplineID, bad.WatchID, sj.ID, bad.IP, bad.Line,
-				)
-				sj.jailSuccessCounter.Incr()
-			}
-		}(bad, log)
-		return nil
-	}
-	if out, err := RunCmd(cmd, cancel); err != nil {
 		err = fmt.Errorf("%w, output=%s", err, out)
 		sj.jailFailCounter.Incr()
 		return err
 	}
+	sj.jailSuccessCounter.Incr()
 	return nil
 }
 

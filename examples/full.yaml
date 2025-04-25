@@ -9,15 +9,18 @@ jails:
     table: filter # NFTables table name to modify
     ipv4_set: ipv4_block_set # IPv4 set name (must exist in nftables config)
     ipv6_set: ipv6_block_set # IPv6 set name (must exist in nftables config)
+    #background: false # run jail in the background if set true
 
   # Echo Jail - Debugging tool that prints blocked IPs to stdout
   # Does NOT perform actual blocking - use for testing/config validation
   - id: echo
     type: echo
+    #background: false # run jail in the background
 
   # Log Jail - Logs the blocked IP.
   - id: log
     type: log
+    #background: false # run jail in the background if set true
 
   # Shell Jail - Execute custom scripts for advanced blocking scenarios
   - id: shell
@@ -35,6 +38,8 @@ jails:
       ip="$1"  # Blocked IP passed as first parameter
       echo "Blocking IP: $ip"  # Example command - replace with actual blocking logic
       echo "Matched group user: $GO2JAIL_user"
+    
+    #background: false # run jail in the background if set true
 
   # HTTP Jail - Blocks IPs using HTTP requests.
   # url,args,headers,and body value can contain ${var} placeholders,
@@ -54,6 +59,7 @@ jails:
     headers:
       - key: X-GO2JAIL
         value: '${user}'
+    #background: false # run jail in the background
 
   # Mail Jail - Blocks IPs by sending mail by SMTP.
   # subject and body value can contain ${var} placeholders,
@@ -70,6 +76,7 @@ jails:
     to: bar <bar@example.com>
     subject: 'Security Alert'
     body: 'Security Alert: IP ${ip} has been blocked by go2jail.'
+    #background: false # run jail in the background if set true
 
 # IP Allow List for all disciplines - Bypass blocking for trusted IPs/CIDRs
 # Format: IPv4/IPv6 addresses with optional CIDR notation (e.g., 192.168.1.0/24)
