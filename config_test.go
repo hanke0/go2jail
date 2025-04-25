@@ -4,6 +4,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -56,6 +57,32 @@ func TestParse(t *testing.T) {
 			cfg, err := Parse(name)
 			require.NoError(t, err)
 			require.NotNil(t, cfg)
+			if strings.Contains(name, "full.yaml") {
+				for name := range jailProviders {
+					require.True(t,
+						slices.ContainsFunc(cfg.Jails, func(j *Jail) bool {
+							return j.Type == name
+						}),
+						"jail type not found in full.yaml: %s", name,
+					)
+				}
+				for name := range watchProviders {
+					require.True(t,
+						slices.ContainsFunc(cfg.Watches, func(j *Watch) bool {
+							return j.Type == name
+						}),
+						"watch type not found in full.yaml: %s", name,
+					)
+				}
+				for name := range disciplineProviders {
+					require.True(t,
+						slices.ContainsFunc(cfg.Disciplines, func(j *Discipline) bool {
+							return j.Type == name
+						}),
+						"discipline type not found in full.yaml: %s", name,
+					)
+				}
+			}
 		})
 	}
 }

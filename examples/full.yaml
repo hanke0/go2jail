@@ -15,16 +15,61 @@ jails:
   - id: echo
     type: echo
 
+  # Log Jail - Logs the blocked IP.
+  - id: log
+    type: log
+
   # Shell Jail - Execute custom scripts for advanced blocking scenarios
-  # Script receives blocked IP as first argument ($1)
   - id: shell
     type: shell
     #shell: bash         # Shell interpreter (default: bash or sh)
     #shell_options: ['-e'] # Shell execution options (default: -e for error checking)
-    #timeout: 60s       # Maximum execution time (units: s=seconds, m=minutes)
+    #timeout: 60s    # Maximum execution time (units: s=seconds, m=minutes)
+    #run_user: root  # User to run the script as (default: current user) process start with root user.
+    #run_group: root # Group to run the script as (default: current group). process start with root user.
+    shell_output: /dev/null # Redirect shell output to this file.
+
+    # Script accepts 2 parameters: IP($1) and match line($2).
+    # All discipline match groups are passed as environment variables prefixed with "GO2JAIL_"
     run: |
       ip="$1"  # Blocked IP passed as first parameter
       echo "Blocking IP: $ip"  # Example command - replace with actual blocking logic
+      echo "Matched group user: $GO2JAIL_user"
+
+  # HTTP Jail - Blocks IPs using HTTP requests.
+  # url,args,headers,and body value can contain ${var} placeholders,
+  # where var is a valid name of discipline matched group.
+  - id: http
+    type: http
+    url: https://example.com
+    method: POST
+    args:
+      - key: user
+        value: '${user}'
+      - key: ip
+        value: '${ip}'
+      - key: alert
+        value: 'true'
+    body: '${ip} ${user}'
+    headers:
+      - key: X-GO2JAIL
+        value: '${user}'
+
+  # Mail Jail - Blocks IPs by sending mail by SMTP.
+  # subject and body value can contain ${var} placeholders,
+  # where var is a valid name of discipline matched group.
+  # Mail body is present in HTML format.
+  - id: mail
+    type: mail
+    host: smtp-mail.outlook.com:587
+    encryption: tls # tls or starttls
+    username: foo@example.com
+    password: bar
+    #password_file: ~/.mailpass
+    from: foo <foo@example.com>
+    to: bar <bar@example.com>
+    subject: 'Security Alert'
+    body: 'Security Alert: IP ${ip} has been blocked by go2jail.'
 
 # IP Allow List for all disciplines - Bypass blocking for trusted IPs/CIDRs
 # Format: IPv4/IPv6 addresses with optional CIDR notation (e.g., 192.168.1.0/24)
@@ -39,6 +84,15 @@ watches:
     files:
       - /var/log/auth.log # System authentication log file path
     skip_when_file_not_exists: false # do not present an error when file not exits.
+  - id: shell
+    type: shell
+    #shell: bash         # Shell interpreter (default: bash or sh)
+    #shell_options: ['-e'] # Shell execution options (default: -e for error checking)
+    #run_user: root      # User to run the script as (default: current user)
+    #run_group: root # Group to run the script as (default: current group)
+    restart_policy: on-success # always,on-success,once.
+    run: |
+      tail -F /var/log/auth.log
 
 # Security Discipline Configuration
 # Define attack patterns and response rules for monitored services
@@ -46,9 +100,9 @@ disciplines:
   - id: sshd # Unique identifier for this security rule set
     type: regex # regex match line.
     # Watches to activate for blocking
-    watches: ["log"]
+    watches: ['log']
     # Jails to activate for blocking
-    jails: ["nft", "echo", "shell"]
+    jails: ['nft', 'echo', 'shell']
     # Rate limit: 5 events per 10 minutes triggers blocking.
     # Format: <count>/[interval]<unit>
     # Support Units: ms=milliseconds, s=seconds, m=minutes, h=hours, d=days
@@ -65,6 +119,7 @@ disciplines:
 
     # Attack detection patterns (https://pkg.go.dev/regexp/syntax)
     # Must contain exactly one named capture group 'ip'.
+    # All named capture groups are passed to jails.
     # Pattern notes:
     # %(ip) is predefined regex that match a named group 'ip' both IPv4 and IPv6,
     # %(ip) will be replaced with real regex before pattern compile.

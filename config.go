@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -18,9 +19,9 @@ type (
 )
 
 var (
-	watchProviders     = map[string]WatchBuilder{}
-	jailProviders      = map[string]JailBuilder{}
-	disciplineBuilders = map[string]DisciplineBuilder{}
+	watchProviders      = map[string]WatchBuilder{}
+	jailProviders       = map[string]JailBuilder{}
+	disciplineProviders = map[string]DisciplineBuilder{}
 )
 
 func RegisterWatcher(name string, bu WatchBuilder) {
@@ -32,7 +33,7 @@ func RegisterJail(name string, bu JailBuilder) {
 }
 
 func RegisterDiscipliner(name string, bu DisciplineBuilder) {
-	disciplineBuilders[name] = bu
+	disciplineProviders[name] = bu
 }
 
 type Line struct {
@@ -96,6 +97,12 @@ func (k KeyValueList) Get(key string) string {
 		}
 	}
 	return ""
+}
+
+func (k KeyValueList) Expand(tpl string) string {
+	return os.Expand(tpl, func(s string) string {
+		return k.Get(s)
+	})
 }
 
 var envRegex = regexp.MustCompile(`[^a-zA-Z0-9_]+`)
@@ -200,7 +207,7 @@ func (d *Discipline) UnmarshalYAML(b []byte) error {
 	if d.Type == "" {
 		d.Type = "regex"
 	}
-	builder := disciplineBuilders[d.Type]
+	builder := disciplineProviders[d.Type]
 	if builder == nil {
 		return fmt.Errorf("unknown discipline type: %s", d.Type)
 	}

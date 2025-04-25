@@ -136,8 +136,7 @@ func (s *YAMLScriptOption) SetupShell() error {
 const defaultScriptOutputSize = 4096
 
 var setCmdUserAndGroup = func(cmd *exec.Cmd, user, group string) error {
-	fmt.Fprintf(os.Stderr, "change run user is not supported in platform: %s\n", runtime.GOOS)
-	return nil
+	return fmt.Errorf("change run user is not supported in platform: %s", runtime.GOOS)
 }
 
 func NewScript(script string, opt *ScriptOption, args ...string) (*exec.Cmd, func(), error) {

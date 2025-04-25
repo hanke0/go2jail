@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -226,7 +227,10 @@ disciplines:
 1.1.1.1 1.1.1.1
 2.2.2.2 2.2.2.2
 `
-	testRunDaemon(t, cfg, lines, expect)
+	u, err := user.Current()
+	require.NoError(t, err)
+	require.NotEqual(t, "", u.Username)
+	testRunDaemon(t, cfg, lines, expect, "user", u.Username)
 }
 
 func TestShellEnvGroup(t *testing.T) {
@@ -308,19 +312,19 @@ func TestHTTPJailWorks(t *testing.T) {
 jails:
   - id: 'http{{.Name}}'
     type: http
-    http_method: POST
-    http_args:
+    method: POST
+    args:
         - key: user
           value: '${user}'
         - key: ip
           value: '${ip}'
         - key: some
           value: 'some'
-    http_body: '${ip} ${user}'
-    http_headers:
+    body: '${ip} ${user}'
+    headers:
       - key: X-GO2JAIL
         value: '${user}'
-    http_url: '{{.url}}/${ip}'
+    url: '{{.url}}/${ip}'
   - id: 'nft{{.Name}}'
     type: shell
     run: |

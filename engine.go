@@ -27,11 +27,10 @@ func (w watchCallback) Exec(line Line, allow Allows, logger Logger) {
 			logger.Errorf("[engine][discipline-%s][watch-%s][jail-%s] arrest %s by line: %s fail: %v", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.Line, err)
 			CountArrestFail.Incr()
 		} else {
-			logger.Debugf("[engine][discipline-%s][watch-%s][jail-%s] arrest success: %s", bad.DisciplineID, bad.WatchID, j.ID, ip)
+			logger.Infof("[engine][discipline-%s][watch-%s][jail-%s] arrest success: %s", bad.DisciplineID, bad.WatchID, j.ID, ip)
 			CountArrestSuccess.Incr()
 		}
 	}
-	return
 }
 
 type Engine struct {

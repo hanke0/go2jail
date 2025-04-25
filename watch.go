@@ -159,9 +159,11 @@ func NewShellWatch(decode Decoder) (Watcher, error) {
 	if s.RestartPolicy == nil {
 		return nil, fmt.Errorf("[watch-%s] restart_policy is nil", s.ID)
 	}
+
 	if err := s.ScriptOption.SetupShell(); err != nil {
 		return nil, fmt.Errorf("[watch-%s] setup shell fail: %w", s.ID, err)
 	}
+	s.ShellOutput = ""
 	s.ch = NewChan[string](0)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	return &s, nil

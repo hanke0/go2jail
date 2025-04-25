@@ -44,6 +44,8 @@ func init() {
 		&runDaemonCommand,
 		&testDisciplineCommand,
 		&testRegexCommand,
+		&testConfigCommand,
+		&testMailCommand,
 	)
 	for _, c := range commands {
 		c.init()
@@ -153,6 +155,29 @@ var testRegexCommand = Command[testRegexOptions]{
 	},
 	Run: func(c *Command[testRegexOptions]) error {
 		return runTestRegex(&c.Options, c.FlagSet.Arg(0))
+	},
+}
+
+type testMailOptions struct {
+	configFlags
+	logFlags
+	JailID string
+}
+
+var testMailCommand = Command[testMailOptions]{
+	Name:             "test-mail",
+	ShortUsage:       "test-mail [OPTION]... <jail-id> [jail-id]...",
+	ShortDescription: "test mail smtp connect by sending a connect mail.",
+	NArgs:            -1,
+	Init: func(c *Command[testMailOptions]) {
+		c.Options.configFlags.init(&c.FlagSet)
+		c.Options.logFlags.init(&c.FlagSet)
+	},
+	Run: func(c *Command[testMailOptions]) error {
+		if c.FlagSet.NArg() == 0 {
+			return fmt.Errorf("No jail id provided. \n%s", badUsageHelp)
+		}
+		return runTestMail(&c.Options, c.FlagSet.Args()...)
 	},
 }
 
@@ -451,6 +476,33 @@ func runTestRegex(flags *testRegexOptions, file string) error {
 		}
 	}
 	return scan.Err()
+}
+
+func runTestMail(cfg *testMailOptions, id ...string) error {
+	c, err := cfg.configFlags.getConfig()
+	if err != nil {
+		return err
+	}
+	logger, clean, err := cfg.logFlags.getLogger()
+	if err != nil {
+		return err
+	}
+	defer clean()
+	var stops Finisher
+	stops.Push(clean)
+	defer stops.Finish()
+	const subject = "go2jail connection test"
+	const body = `<div id="root"><p>This email is just a test of the SMTP connection.<p>You may ignore it.</p></div>`
+	for _, v := range c.Jails {
+		if m, ok := v.Action.(Mailer); ok && slices.Contains(id, v.ID) {
+			if err := m.SendMail(logger, subject, body); err != nil {
+				fmt.Println("MAIL TESTING FAIL: ", v.ID)
+				return err
+			}
+			fmt.Println("MAIL TESTING OK: ", v.ID)
+		}
+	}
+	return nil
 }
 
 type Multi struct {
