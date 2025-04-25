@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func makeTestConfig(t *testing.T, content string) string {
+func makeTestConfig(t *testing.T, content string, options ...string) string {
 	testSetStrictConfig(t)
 	t.Helper()
 	tpl, err := template.New(t.Name()).Parse(content)
@@ -24,11 +29,15 @@ func makeTestConfig(t *testing.T, content string) string {
 	})
 	writeTestNft(t, dir)
 	var s strings.Builder
-	err = tpl.Execute(&s, map[string]string{
+	m := map[string]string{
 		"dir":    dir,
 		"nftlog": filepath.Join(dir, "nft.log"),
 		"Name":   t.Name(),
-	})
+	}
+	for i := 0; i < len(options); i += 2 {
+		m[options[i]] = options[i+1]
+	}
+	err = tpl.Execute(&s, m)
 	require.NoError(t, err)
 	text := s.String()
 	err = os.WriteFile(filepath.Join(dir, "test.yaml"), []byte(text), 0777)
@@ -53,9 +62,9 @@ func writeTestNft(t *testing.T, dir string) {
 }
 
 func testRunDaemon(t *testing.T,
-	configContent, LinesContent, expect string) string {
+	configContent, LinesContent, expect string, options ...string) string {
 	t.Helper()
-	dir := makeTestConfig(t, configContent)
+	dir := makeTestConfig(t, configContent, options...)
 	nftlog := filepath.Join(dir, "nft.log")
 	watchfile := filepath.Join(dir, "test.log")
 	err := os.WriteFile(watchfile, nil, 0777)
@@ -279,6 +288,75 @@ disciplines:
 3.3.3.6 3.3.3.6
 `
 	testRunDaemon(t, cfg, lines, expect)
+}
+
+func TestHTTPJailWorks(t *testing.T) {
+	var requests []*http.Request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		request := r.Clone(context.Background())
+		request.Body = io.NopCloser(bytes.NewReader(body))
+		requests = append(requests, request)
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := `
+jails:
+  - id: 'http{{.Name}}'
+    type: http
+    http_method: POST
+    http_args:
+        - key: user
+          value: '${user}'
+        - key: ip
+          value: '${ip}'
+        - key: some
+          value: 'some'
+    http_body: '${ip} ${user}'
+    http_headers:
+      - key: X-GO2JAIL
+        value: '${user}'
+    http_url: '{{.url}}/${ip}'
+  - id: 'nft{{.Name}}'
+    type: shell
+    run: |
+      nft "$1"
+watches:
+  - id: '{{.Name}}'
+    type: file
+    files: [{{.dir}}/test.log]
+disciplines:
+  - id: '{{.Name}}'
+    jails: ['http{{.Name}}','nft{{.Name}}']
+    watches: ['{{.Name}}']
+    matches: '%(ip) (?P<user>.+)'
+    rate: 1/s
+`
+	lines := `1.1.1.1 user1
+2.2.2.2 user2
+`
+	expect := `1.1.1.1
+2.2.2.2
+`
+	testRunDaemon(t, cfg, lines, expect, "url", server.URL)
+	require.Len(t, requests, 2)
+	for i, req := range requests {
+		user := fmt.Sprintf("user%d", i+1)
+		ip := fmt.Sprintf("%[1]d.%[1]d.%[1]d.%[1]d", i+1)
+		bbody, _ := io.ReadAll(req.Body)
+		body := string(bbody)
+		require.Equal(t, "POST", req.Method)
+		require.Equal(t, "/"+ip, req.URL.Path)
+		require.Equal(t, ip, req.URL.Query().Get("ip"))
+		require.Equal(t, user, req.URL.Query().Get("user"))
+		require.Equal(t, "some", req.URL.Query().Get("some"))
+		require.Equal(t, user, req.Header.Get("X-GO2JAIL"))
+		require.Equal(t, ip+" "+user, body)
+	}
 }
 
 func TestTestingWorks(t *testing.T) {

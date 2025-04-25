@@ -3,7 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -12,6 +17,7 @@ func init() {
 	RegisterJail("echo", NewEchoJail)
 	RegisterJail("log", NewLogJail)
 	RegisterJail("shell", NewShellJail)
+	RegisterJail("http", NewHTTPJail)
 }
 
 type NftJail struct {
@@ -199,5 +205,71 @@ func (sj *ShellJail) Arrest(bad BadLog, log Logger) error {
 }
 
 func (sj *ShellJail) Close() error {
+	return nil
+}
+
+type HTTPJail struct {
+	BaseJail `yaml:",inline"`
+	URL      string     `yaml:"http_url"`
+	Method   string     `yaml:"http_method"`
+	Args     []KeyValue `yaml:"http_args"`
+	Headers  []KeyValue `yaml:"http_headers"`
+	Body     string     `yaml:"http_body"`
+}
+
+func NewHTTPJail(decode Decoder) (Jailer, error) {
+	var j HTTPJail
+	if err := decode(&j); err != nil {
+		return nil, err
+	}
+	_, err := url.Parse(j.URL)
+	if err != nil {
+		return nil, err
+	}
+	if j.Method == "" {
+		j.Method = http.MethodPost
+	}
+	return &j, nil
+}
+
+func (hj *HTTPJail) Arrest(bad BadLog, log Logger) error {
+	log.Debugf("[jail-%s] start arrest ip %s", hj.ID, bad.IP)
+	expander := func(s string) string {
+		for _, entry := range bad.Extend {
+			if entry.Key == s {
+				return entry.Value
+			}
+		}
+		return ""
+	}
+	body := os.Expand(hj.Body, expander)
+	url := os.Expand(hj.URL, expander)
+	req, err := http.NewRequest(hj.Method, url, strings.NewReader(body))
+	if err != nil {
+		return err
+	}
+	for _, entry := range hj.Headers {
+		req.Header.Add(entry.Key, os.Expand(entry.Value, expander))
+	}
+	query := req.URL.Query()
+	for _, entry := range hj.Args {
+		query.Add(entry.Key, os.Expand(entry.Value, expander))
+	}
+	req.URL.RawQuery = query.Encode()
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		body := io.LimitReader(resp.Body, 1024)
+		b, _ := io.ReadAll(body)
+		return fmt.Errorf("http status code %d, body=%s", resp.StatusCode, string(b))
+	}
+	log.Infof("[jail-%s] arrest ip %s success", hj.ID, bad.IP)
+	return nil
+}
+
+func (hj *HTTPJail) Close() error {
 	return nil
 }

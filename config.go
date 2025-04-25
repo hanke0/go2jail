@@ -83,8 +83,8 @@ func (j *Watch) UnmarshalYAML(b []byte) error {
 }
 
 type KeyValue struct {
-	Key   string
-	Value string
+	Key   string `yaml:"key"`
+	Value string `yaml:"value"`
 }
 
 type KeyValueList []KeyValue
