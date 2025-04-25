@@ -225,11 +225,16 @@ var inheritEnv = []string{
 
 func RunScript(script string, opt *ScriptOption, args ...string) (string, error) {
 	cmd, cancel, err := NewScript(script, opt, args...)
-	defer cancel()
 	if err != nil {
 		return "", err
 	}
-	err = cmd.Run()
+	return RunCmd(cmd, cancel)
+
+}
+
+func RunCmd(cmd *exec.Cmd, cancel func()) (string, error) {
+	defer cancel()
+	err := cmd.Run()
 	var out string
 	if os.Stdout != nil {
 		b, ok := cmd.Stdout.(*RingBuffer)
