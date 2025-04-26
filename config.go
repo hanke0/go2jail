@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -97,12 +96,6 @@ func (k KeyValueList) Get(key string) string {
 		}
 	}
 	return ""
-}
-
-func (k KeyValueList) Expand(tpl string) string {
-	return os.Expand(tpl, func(s string) string {
-		return k.Get(s)
-	})
 }
 
 var envRegex = regexp.MustCompile(`[^a-zA-Z0-9_]+`)

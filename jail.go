@@ -311,8 +311,8 @@ func NewMailJail(decode Decoder) (Jailer, error) {
 }
 
 func (mj *MailJail) Arrest(bad BadLog, log Logger) error {
-	body := bad.Mapping(mj.Body)
-	subject := bad.Mapping(mj.Subject)
+	body := os.Expand(mj.Body, bad.Mapping)
+	subject := os.Expand(mj.Subject, bad.Mapping)
 	err := mj.SendMail(log, subject, body)
 	return err
 }
