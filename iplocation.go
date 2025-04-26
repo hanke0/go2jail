@@ -39,6 +39,30 @@ func (is IPLocationSources) GetLocation(logger Logger, ip net.IP) string {
 	if ip == nil || len(is) == 0 {
 		return "-"
 	}
+	if ip.IsLoopback() {
+		return "localhost"
+	}
+	if ip.IsPrivate() {
+		return "private"
+	}
+	if ip.IsLinkLocalUnicast() {
+		return "link-local-unicast"
+	}
+	if ip.IsUnspecified() {
+		return "unspecified"
+	}
+	if ip.IsInterfaceLocalMulticast() {
+		return "interface-local-multicast"
+	}
+	if ip.IsLinkLocalMulticast() {
+		return "link-local-multicast"
+	}
+	if ip.IsMulticast() {
+		return "multicast"
+	}
+	if ip.Equal(net.IPv4bcast) {
+		return "broadcast"
+	}
 	if l := ipCache.Get(ip); l != "" {
 		return l
 	}

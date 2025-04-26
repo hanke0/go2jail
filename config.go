@@ -322,8 +322,7 @@ LOOP:
 type Allows []net.IPNet
 
 func (a Allows) Contains(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsUnspecified() ||
-		ip.IsMulticast() {
+	if ip.IsLoopback() || ip.IsUnspecified() {
 		return true
 	}
 	for _, l := range a {
