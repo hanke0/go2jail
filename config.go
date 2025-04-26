@@ -137,6 +137,7 @@ type BadLog struct {
 	DisciplineID string
 	IP           net.IP
 	Extend       KeyValueList
+	IPLocation   string
 }
 
 func NewBadLog(line Line, disciplineID string, ip net.IP, extend ...KeyValue) BadLog {
@@ -146,6 +147,23 @@ func NewBadLog(line Line, disciplineID string, ip net.IP, extend ...KeyValue) Ba
 		DisciplineID: disciplineID,
 		IP:           ip,
 		Extend:       extend,
+	}
+}
+
+func (b *BadLog) AsEnv() []string {
+	envs := b.Extend.AsEnv()
+	envs = append(envs, fmt.Sprintf("GO2JAIL_IP_LOCATION=%s", b.IPLocation))
+	return envs
+}
+
+func (b *BadLog) Mapping(s string) string {
+	switch s {
+	case "ip":
+		return b.IP.String()
+	case "ip_location":
+		return b.IPLocation
+	default:
+		return b.Extend.Get(s)
 	}
 }
 
@@ -221,10 +239,11 @@ func (d *Discipline) UnmarshalYAML(b []byte) error {
 }
 
 type Config struct {
-	Jails       []*Jail       `yaml:"jails"`
-	Watches     []*Watch      `yaml:"watches"`
-	Disciplines []*Discipline `yaml:"disciplines"`
-	Allows      Allows        `yaml:"allows"`
+	Jails             []*Jail           `yaml:"jails"`
+	Watches           []*Watch          `yaml:"watches"`
+	Disciplines       []*Discipline     `yaml:"disciplines"`
+	Allows            Allows            `yaml:"allows"`
+	IPLocationSources IPLocationSources `yaml:"ip_location_sources"`
 }
 
 func Parse(files ...string) (*Config, error) {
@@ -280,6 +299,9 @@ func mergeConfig(dst, src *Config) {
 	})
 	dst.Allows = appendIf(dst.Allows, src.Allows, func(a, b net.IPNet) bool {
 		return a.IP.Equal(b.IP) && a.Mask.String() == b.Mask.String()
+	})
+	dst.IPLocationSources = appendIf(dst.IPLocationSources, src.IPLocationSources, func(a, b *IPLocationSource) bool {
+		return a.ID == b.ID
 	})
 }
 

@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/user"
@@ -666,7 +668,6 @@ func (w *chanWriter) Write(p []byte) (n int, err error) {
 	for len(p) > 0 {
 		if idx := bytes.IndexByte(p, '\n'); idx > -1 {
 			w.buf = append(w.buf, p[:idx]...)
-			fmt.Println("send *****: ", string(w.buf))
 			if err := w.ch.Send(string(w.buf)); err != nil {
 				return size - len(p), err
 			}
@@ -810,4 +811,63 @@ func NewYAMLDecoder(b []byte) Decoder {
 	return func(v any) error {
 		return YamlDecode(b, v)
 	}
+}
+
+type HTTPHelper struct {
+	URL     string        `yaml:"url"`
+	Method  string        `yaml:"method"`
+	Args    []KeyValue    `yaml:"args"`
+	Headers []KeyValue    `yaml:"headers"`
+	Body    string        `yaml:"body"`
+	Timeout time.Duration `yaml:"timeout"`
+}
+
+func (h *HTTPHelper) Init(defaultMethod string) error {
+	_, err := url.Parse(h.URL)
+	if err != nil {
+		return fmt.Errorf("bad url: %w, %s", err, h.URL)
+	}
+	if h.Method == "" {
+		h.Method = defaultMethod
+	}
+	if h.Timeout <= 0 {
+		h.Timeout = time.Second
+	}
+	return nil
+}
+
+func (h *HTTPHelper) Do(
+	ctx context.Context, readBody bool, mapping func(string) string) ([]byte, error) {
+	body := os.Expand(h.Body, mapping)
+	url := os.Expand(h.URL, mapping)
+	ctx, cancel := context.WithTimeout(ctx, h.Timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, h.Method, url, strings.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request fail: url=%s %w", url, err)
+	}
+	for _, entry := range h.Headers {
+		req.Header.Add(entry.Key, os.Expand(entry.Value, mapping))
+	}
+	if len(h.Args) > 0 {
+		query := req.URL.Query()
+		for _, entry := range h.Args {
+			query.Add(entry.Key, os.Expand(entry.Value, mapping))
+		}
+		req.URL.RawQuery = query.Encode()
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("do request fail: url=%s %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		body := io.LimitReader(resp.Body, 1024)
+		b, _ := io.ReadAll(body)
+		return nil, fmt.Errorf("%s %s http status code %d, body=%s", req.Method, req.URL, resp.StatusCode, string(b))
+	}
+	if readBody {
+		return io.ReadAll(resp.Body)
+	}
+	return nil, nil
 }

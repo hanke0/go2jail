@@ -14,7 +14,6 @@ import (
 	"net/mail"
 	"net/smtp"
 	"net/textproto"
-	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -200,7 +199,7 @@ func NewShellJail(decode Decoder) (Jailer, error) {
 func (sj *ShellJail) Arrest(bad BadLog, log Logger) error {
 	opt := ScriptOption{
 		YAMLScriptOption: sj.YAMLScriptOption,
-		Env:              bad.Extend.AsEnv(),
+		Env:              bad.AsEnv(),
 	}
 	out, err := RunScript(sj.Run, &opt, bad.IP.String(), bad.Line)
 	if err != nil {
@@ -217,12 +216,8 @@ func (sj *ShellJail) Close() error {
 }
 
 type HTTPJail struct {
-	BaseJail `yaml:",inline"`
-	URL      string     `yaml:"url"`
-	Method   string     `yaml:"method"`
-	Args     []KeyValue `yaml:"args"`
-	Headers  []KeyValue `yaml:"headers"`
-	Body     string     `yaml:"body"`
+	BaseJail   `yaml:",inline"`
+	HTTPHelper `yaml:",inline"`
 }
 
 func NewHTTPJail(decode Decoder) (Jailer, error) {
@@ -230,43 +225,16 @@ func NewHTTPJail(decode Decoder) (Jailer, error) {
 	if err := decode(&j); err != nil {
 		return nil, err
 	}
-	_, err := url.Parse(j.URL)
-	if err != nil {
-		return nil, fmt.Errorf("bad url: %w, %s", err, j.URL)
-	}
-	if j.Method == "" {
-		j.Method = http.MethodPost
+	if err := j.HTTPHelper.Init("POST"); err != nil {
+		return nil, err
 	}
 	return &j, nil
 }
 
 func (hj *HTTPJail) Arrest(bad BadLog, log Logger) error {
 	log.Debugf("[jail-%s] start arrest ip %s", hj.ID, bad.IP)
-	body := bad.Extend.Expand(hj.Body)
-	url := bad.Extend.Expand(hj.URL)
-	req, err := http.NewRequest(hj.Method, url, strings.NewReader(body))
-	if err != nil {
-		return err
-	}
-	for _, entry := range hj.Headers {
-		req.Header.Add(entry.Key, bad.Extend.Expand(entry.Value))
-	}
-	query := req.URL.Query()
-	for _, entry := range hj.Args {
-		query.Add(entry.Key, bad.Extend.Expand(entry.Value))
-	}
-	req.URL.RawQuery = query.Encode()
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		body := io.LimitReader(resp.Body, 1024)
-		b, _ := io.ReadAll(body)
-		return fmt.Errorf("http status code %d, body=%s", resp.StatusCode, string(b))
-	}
-	return nil
+	_, err := hj.HTTPHelper.Do(context.Background(), false, bad.Mapping)
+	return err
 }
 
 func (hj *HTTPJail) Close() error {
@@ -343,8 +311,8 @@ func NewMailJail(decode Decoder) (Jailer, error) {
 }
 
 func (mj *MailJail) Arrest(bad BadLog, log Logger) error {
-	body := bad.Extend.Expand(mj.Body)
-	subject := bad.Extend.Expand(mj.Subject)
+	body := bad.Mapping(mj.Body)
+	subject := bad.Mapping(mj.Subject)
 	err := mj.SendMail(log, subject, body)
 	return err
 }

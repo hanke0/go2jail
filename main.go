@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -46,6 +47,7 @@ func init() {
 		&testRegexCommand,
 		&testConfigCommand,
 		&testMailCommand,
+		&ipLocationCommand,
 	)
 	for _, c := range commands {
 		c.init()
@@ -175,9 +177,29 @@ var testMailCommand = Command[testMailOptions]{
 	},
 	Run: func(c *Command[testMailOptions]) error {
 		if c.FlagSet.NArg() == 0 {
-			return fmt.Errorf("No jail id provided. \n%s", badUsageHelp)
+			return fmt.Errorf("no jail id provided. \n%s", badUsageHelp)
 		}
 		return runTestMail(&c.Options, c.FlagSet.Args()...)
+	},
+}
+
+type ipLocationOptions struct {
+	configFlags
+	logFlags
+}
+
+var ipLocationCommand = Command[ipLocationOptions]{
+	Name:             "ip-location",
+	ShortUsage:       "ip-location [OPTION]... <ip>",
+	ShortDescription: "get ip location.",
+	NArgs:            1,
+	Init: func(c *Command[ipLocationOptions]) {
+		c.Options.configFlags.init(&c.FlagSet)
+		c.Options.logFlags.init(&c.FlagSet)
+	},
+	Run: func(c *Command[ipLocationOptions]) error {
+		opt := &c.Options
+		return runIPLocation(opt, c.FlagSet.Arg(0))
 	},
 }
 
@@ -203,10 +225,10 @@ func (c *Command[T]) run(args []string) error {
 	}
 	if c.NArgs >= 0 {
 		if c.FlagSet.NArg() < c.NArgs {
-			return fmt.Errorf("Too few arguments. \n%s", badUsageHelp)
+			return fmt.Errorf("too few arguments. \n%s", badUsageHelp)
 		}
 		if c.FlagSet.NArg() > c.NArgs {
-			return fmt.Errorf("Too many arguments. \n%s", badUsageHelp)
+			return fmt.Errorf("too many arguments. \n%s", badUsageHelp)
 		}
 	}
 	return c.Run(c)
@@ -487,7 +509,6 @@ func runTestMail(cfg *testMailOptions, id ...string) error {
 	if err != nil {
 		return err
 	}
-	defer clean()
 	var stops Finisher
 	stops.Push(clean)
 	defer stops.Finish()
@@ -502,6 +523,22 @@ func runTestMail(cfg *testMailOptions, id ...string) error {
 			fmt.Println("MAIL TESTING OK: ", v.ID)
 		}
 	}
+	return nil
+}
+
+func runIPLocation(opt *ipLocationOptions, ip string) error {
+	cfg, err := opt.configFlags.getConfig()
+	if err != nil {
+		return err
+	}
+	logger, clean, err := opt.logFlags.getLogger()
+	if err != nil {
+		return err
+	}
+	defer clean()
+	logger.Debugf("ip location sources length: %d", len(cfg.IPLocationSources))
+	loc := cfg.IPLocationSources.GetLocation(logger, net.ParseIP(ip))
+	fmt.Println(loc)
 	return nil
 }
 

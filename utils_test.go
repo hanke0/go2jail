@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net"
+	"sort"
 	"testing"
 	"time"
 
@@ -92,4 +94,29 @@ func TestChanWrite(t *testing.T) {
 	}
 	time.Sleep(time.Millisecond * 100) // wait channel consume
 	require.Equal(t, []string{"123456", "789", "012"}, lines)
+}
+
+func TestIPLocationCache(t *testing.T) {
+	var cache IPLocationCache
+	cache.Init(2)
+	ip1 := net.ParseIP("1.1.1.1")
+	cache.Set(ip1, t.Name())
+	require.Equal(t, t.Name(), cache.Get(ip1))
+	ip2 := net.ParseIP("2.2.2.2")
+	require.Equal(t, "", cache.Get(ip2))
+	cache.Set(ip2, t.Name())
+	require.Equal(t, t.Name(), cache.Get(ip2))
+	ip3 := net.ParseIP("3.3.3.3")
+	require.Equal(t, "", cache.Get(ip3))
+	cache.Set(ip3, t.Name()+"3")
+	require.Equal(t, t.Name()+"3", cache.Get(ip3))
+
+	lists := []string{cache.Get(ip1), cache.Get(ip2), cache.Get(ip3)}
+	sort.Strings(lists)
+	require.Equal(t, []string{"", t.Name(), t.Name() + "3"}, lists)
+
+	ip4 := net.ParseIP("4.4.4.4")
+	require.Equal(t, "", cache.Get(ip4))
+	cache.Set(ip4, t.Name()+"4")
+	require.Equal(t, t.Name()+"4", cache.Get(ip4))
 }

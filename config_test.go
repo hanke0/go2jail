@@ -82,6 +82,8 @@ func TestParse(t *testing.T) {
 						"discipline type not found in full.yaml: %s", name,
 					)
 				}
+				require.Greater(t, len(cfg.Allows), 0)
+				require.Greater(t, len(cfg.IPLocationSources), 0)
 			}
 		})
 	}

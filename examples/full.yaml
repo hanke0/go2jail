@@ -38,7 +38,7 @@ jails:
       ip="$1"  # Blocked IP passed as first parameter
       echo "Blocking IP: $ip"  # Example command - replace with actual blocking logic
       echo "Matched group user: $GO2JAIL_user"
-    
+
     #background: false # run jail in the background if set true
 
   # HTTP Jail - Blocks IPs using HTTP requests.
@@ -141,3 +141,18 @@ disciplines:
     # allows ip for this discipline
     allows:
       - 192.168.1.0/24
+
+ip_location_sources:
+  - id: ip-api
+    method: GET
+    url: 'http://ip-api.com/json/${ip}?fields=country,regionName,city'
+    timeout: 1000ms
+    country_pointer: /country
+    region_pointer: /regionName
+    city_pointer: /city
+  - method: GET
+    url: 'https://ipinfo.io/${ip}/json'
+    timeout: 1000ms
+    country_pointer: /country
+    region_pointer: /region
+    city_pointer: /city

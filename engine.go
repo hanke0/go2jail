@@ -9,8 +9,9 @@ import (
 )
 
 type watchCallback struct {
-	d  *Discipline
-	js []*Jail
+	d                 *Discipline
+	js                []*Jail
+	IPLocationSources IPLocationSources
 }
 
 func (w watchCallback) Exec(line Line, allow Allows, logger Logger) {
@@ -19,7 +20,8 @@ func (w watchCallback) Exec(line Line, allow Allows, logger Logger) {
 		return
 	}
 	ip := bad.IP
-	logger.Debugf("[engine][discipline-%s][watch-%s] bad ip: %s %s", bad.DisciplineID, bad.WatchID, ip, bad.Line)
+	bad.IPLocation = w.IPLocationSources.GetLocation(logger, ip)
+	logger.Debugf("[engine][discipline-%s][watch-%s] bad ip: %s %s %s", bad.DisciplineID, bad.WatchID, ip, bad.IPLocation, bad.Line)
 	for _, j := range w.js {
 		if j.Background {
 			go runJail(bad, j, logger)
@@ -31,13 +33,13 @@ func (w watchCallback) Exec(line Line, allow Allows, logger Logger) {
 
 func runJail(bad BadLog, j *Jail, logger Logger) {
 	ip := bad.IP
-	logger.Debugf("[engine][discipline-%s][watch-%s][jail-%s] start arrest %s by line: %s", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.Line)
+	logger.Debugf("[engine][discipline-%s][watch-%s][jail-%s] start arrest %s[%s] by line: %s", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.IPLocation, bad.Line)
 	err := j.Action.Arrest(bad, logger)
 	if err != nil {
-		logger.Errorf("[engine][discipline-%s][watch-%s][jail-%s] arrest %s by line: %s fail: %v", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.Line, err)
+		logger.Errorf("[engine][discipline-%s][watch-%s][jail-%s] arrest %s[%s] by line: %s fail: %v", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.IPLocation, bad.Line, err)
 		CountArrestFail.Incr()
 	} else {
-		logger.Infof("[engine][discipline-%s][watch-%s][jail-%s] arrest success: %s", bad.DisciplineID, bad.WatchID, j.ID, ip)
+		logger.Infof("[engine][discipline-%s][watch-%s][jail-%s] arrest success: %s[%s]", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.IPLocation)
 		CountArrestSuccess.Incr()
 	}
 }
@@ -76,8 +78,8 @@ func (e *Engine) StopAndWait() {
 	e.Wait()
 }
 
-func (e *Engine) AddDiscipline(w *Watch, d *Discipline, js []*Jail) {
-	e.watchList[w] = append(e.watchList[w], watchCallback{d: d, js: js})
+func (e *Engine) AddDiscipline(w *Watch, d *Discipline, js []*Jail, sources IPLocationSources) {
+	e.watchList[w] = append(e.watchList[w], watchCallback{d: d, js: js, IPLocationSources: sources})
 	e.cancels.Push(func() {
 		d.Action.Close()
 	})
@@ -202,7 +204,7 @@ func Start(cfg *Config, logger Logger, test string, statListen string) (wait, st
 				eg.StopAndWait()
 				return nil, nil, fmt.Errorf("watch id not exist: %s", w)
 			}
-			eg.AddDiscipline(cfg.Watches[idx], d, jails)
+			eg.AddDiscipline(cfg.Watches[idx], d, jails, cfg.IPLocationSources)
 		}
 	}
 	if err := eg.Start(testing, cfg.Allows, logger); err != nil {

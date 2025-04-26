@@ -254,9 +254,9 @@ disciplines:
 	lines := `1.1.1.1 user1
 1.1.1.1 user2
 2.2.2.2 user3`
-	expect := `1.1.1.1 GO2JAIL_ip=1.1.1.1 GO2JAIL_=1.1.1.1 user1 GO2JAIL_user=user1
-1.1.1.1 GO2JAIL_ip=1.1.1.1 GO2JAIL_=1.1.1.1 user2 GO2JAIL_user=user2
-2.2.2.2 GO2JAIL_ip=2.2.2.2 GO2JAIL_=2.2.2.2 user3 GO2JAIL_user=user3
+	expect := `1.1.1.1 GO2JAIL_ip=1.1.1.1 GO2JAIL_=1.1.1.1 user1 GO2JAIL_user=user1 GO2JAIL_IP_LOCATION=-
+1.1.1.1 GO2JAIL_ip=1.1.1.1 GO2JAIL_=1.1.1.1 user2 GO2JAIL_user=user2 GO2JAIL_IP_LOCATION=-
+2.2.2.2 GO2JAIL_ip=2.2.2.2 GO2JAIL_=2.2.2.2 user3 GO2JAIL_user=user3 GO2JAIL_IP_LOCATION=-
 `
 	testRunDaemon(t, cfg, lines, expect)
 }
