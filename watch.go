@@ -170,18 +170,23 @@ func NewShellWatch(decode Decoder) (Watcher, error) {
 }
 
 func (sd *ShellWatch) Test(logger Logger) (<-chan Line, error) {
-	v, err := sd.Watch(logger)
-	sd.RestartPolicy.Stop()
-	return v, err
+	return sd.watch(logger, true)
 }
 
 func (sd *ShellWatch) Watch(logger Logger) (<-chan Line, error) {
+	return sd.watch(logger, false)
+}
+
+func (sd *ShellWatch) watch(logger Logger, test bool) (<-chan Line, error) {
 	logger.Infof("[watch-%s] watch starting", sd.ID)
 	sd.RestartPolicy.Next(nil)
-	cmd, cancel, err := sd.execute(logger)
+	cmd, cancel, err := sd.execute(logger, test)
 	if err != nil {
 		sd.clean()
 		return nil, err
+	}
+	if test {
+		sd.RestartPolicy.Stop()
 	}
 	sd.wg.Add(1)
 	go func() {
@@ -199,7 +204,7 @@ func (sd *ShellWatch) Watch(logger Logger) (<-chan Line, error) {
 		exeErr := waitExit()
 		for sd.RestartPolicy.Next(exeErr) {
 			logger.Debugf("[watch-%s] exec restart: exiterr=%v", sd.ID, exeErr)
-			cmd, cancel, exeErr = sd.execute(logger)
+			cmd, cancel, exeErr = sd.execute(logger, test)
 			if exeErr == nil {
 				exeErr = waitExit()
 			}
@@ -242,13 +247,17 @@ func (sd *ShellWatch) Watch(logger Logger) (<-chan Line, error) {
 	return ch.Reader(), nil
 }
 
-func (sd *ShellWatch) execute(logger Logger) (cmd *exec.Cmd, cancel func(), err error) {
+func (sd *ShellWatch) execute(logger Logger, test bool) (cmd *exec.Cmd, cancel func(), err error) {
 	w := ChanWriter(sd.ch)
 	opt := &ScriptOption{
 		YAMLScriptOption: sd.YAMLScriptOption,
 		ForceOutput:      w,
 	}
 	opt.Timeout = -1
+	if test {
+		opt.Timeout = time.Second * 10
+		opt.Env = append(opt.Env, "GO2JAIL_TEST=true")
+	}
 	cmd, cancelCtx, err := NewScript(sd.Run, opt, sd.ID)
 	if err != nil {
 		logger.Errorf("[watch-%s] new shell script fail: %v", sd.ID, err)
