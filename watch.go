@@ -127,7 +127,7 @@ func (fd *FileWatch) watch(logger Logger, testing bool) (<-chan Line, error) {
 						logger.Errorf("[watch-%s] tail file fail %s: %v", fd.ID, f, line.Err)
 						return
 					}
-					logger.Debugf("[watch-%s] get line from %s: length=%d", fd.ID, f, len(line.Text))
+					logger.Debugf("[watch-%s] get line from %s: '%s'", fd.ID, f, line.Text)
 					l := NewLine(fd.ID, line.Text)
 					if err := ch.Send(l); err != nil {
 						return
@@ -249,6 +249,7 @@ func (sd *ShellWatch) watch(logger Logger, test bool) (<-chan Line, error) {
 					return
 				}
 				l := NewLine(sd.ID, line)
+				logger.Debugf("[watch-%s] get line '%s'", sd.ID, l.Text)
 				if err := ch.Send(l); err != nil {
 					logger.Infof("[watch-%s] send line to channel fail: %v", sd.ID, err)
 					return

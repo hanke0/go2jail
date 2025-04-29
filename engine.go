@@ -21,7 +21,7 @@ func (w watchCallback) Exec(line Line, allow Allows, logger Logger) {
 	}
 	ip := bad.IP
 	bad.IPLocation = w.IPLocationSources.GetLocation(logger, ip)
-	logger.Debugf("[engine][discipline-%s][watch-%s] bad ip: %s %s %s", bad.DisciplineID, bad.WatchID, ip, bad.IPLocation, bad.Line)
+	logger.Debugf("[engine][discipline-%s][watch-%s] start arrest ip: %s %s %s", bad.DisciplineID, bad.WatchID, ip, bad.IPLocation, bad.Line)
 	for _, j := range w.js {
 		if j.Background {
 			go runJail(bad, j, logger)

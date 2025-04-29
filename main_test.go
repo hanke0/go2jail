@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -62,30 +64,49 @@ func writeTestNft(t *testing.T, dir string) {
 	})
 }
 
-func testRunDaemon(t *testing.T,
-	configContent, LinesContent, expect string, options ...string) string {
+var testStatAddr string
+
+func init() {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	testStatAddr = ln.Addr().String()
+	if err := ln.Close(); err != nil {
+		panic(err)
+	}
+}
+
+func testStartDaemon(t *testing.T,
+	configContent, LinesContent string, options ...string) (wait, stop func(), dir string) {
 	t.Helper()
-	dir := makeTestConfig(t, configContent, options...)
-	nftlog := filepath.Join(dir, "nft.log")
+	dir = makeTestConfig(t, configContent, options...)
 	watchfile := filepath.Join(dir, "test.log")
 	err := os.WriteFile(watchfile, nil, 0777)
 	require.NoError(t, err)
 	var opt runDaemonOption
 	opt.ConfigDir = dir
 	opt.LogLevel = "debug"
-	wait, stop, err := runDaemon(&opt)
+	opt.HTTPStatsListenAddr = testStatAddr
+	globalCounters.Clear()
+	wait, stop, err = runDaemon(&opt)
 	require.NoError(t, err)
 
 	script := fmt.Sprintf(`#!/bin/bash
-cat >> %s <<'__EOF__'
+	cat >> %s <<'__EOF__'
 %s
 __EOF__
-    `, watchfile, LinesContent)
+`, watchfile, LinesContent)
 	s, err := RunScript(
 		script,
 		&ScriptOption{},
 	)
 	require.NoError(t, err, s)
+	return wait, stop, dir
+}
+
+func testWaitNftLogWrite(t *testing.T, dir string) string {
+	nftlog := filepath.Join(dir, "nft.log")
 	for range 50 {
 		_, err := os.Stat(nftlog)
 		if err == nil {
@@ -96,10 +117,15 @@ __EOF__
 			time.Sleep(time.Millisecond * 100)
 			continue
 		}
-		stop()
-		wait()
 		t.Fatal(err)
 	}
+	return nftlog
+}
+
+func testRunDaemon(t *testing.T,
+	configContent, LinesContent, expect string, options ...string) string {
+	wait, stop, dir := testStartDaemon(t, configContent, LinesContent, options...)
+	nftlog := testWaitNftLogWrite(t, dir)
 	t.Log("stopping...")
 	stop()
 	t.Log("waiting...")
@@ -139,6 +165,69 @@ disciplines:
 add element inet filter ipv4_block_set { 2.2.2.2 }
 `
 	testRunDaemon(t, cfg, lines, expect)
+}
+
+func TestCountersWorks(t *testing.T) {
+	cfg := `
+jails:
+  - id: '{{.Name}}'
+    type: nftset
+    sudo: false # run nft command without sudo
+    nft_executable: nft # nft executable path
+    rule: inet # nft rule name
+    table: filter # nft table name
+    ipv4_set: ipv4_block_set # nft set name for ipv4
+    ipv6_set: ipv6_block_set # nft set name for ipv6
+watches:
+  - id: '{{.Name}}'
+    type: file
+    files: [{{.dir}}/test.log]
+disciplines:
+  - id: '{{.Name}}'
+    jails: ['{{.Name}}']
+    watches: ['{{.Name}}']
+    matches: '%(ip)'
+    rate: 1/1s
+`
+	lines := `1.1.1.1
+0.0.0.0
+2.2.2.2`
+	expect := `add element inet filter ipv4_block_set { 1.1.1.1 }
+add element inet filter ipv4_block_set { 2.2.2.2 }
+`
+	wait, stop, dir := testStartDaemon(t, cfg, lines)
+	nftlog := testWaitNftLogWrite(t, dir)
+	var bs bytes.Buffer
+	err := OutputCounters(&bs)
+	require.NoError(t, err)
+	t.Log("stopping...")
+	stop()
+	t.Log("waiting...")
+	wait()
+	t.Log("read nft log")
+	b, err := os.ReadFile(nftlog)
+	require.NoError(t, err)
+	require.Equal(t, expect, string(b))
+
+	var d map[string]map[string]map[string]int
+	err = json.Unmarshal(bs.Bytes(), &d)
+	require.NoError(t, err)
+	testEqual := func(group, id, name string, expect int) {
+		t.Helper()
+		v, ok := d[group][id][name]
+		require.True(t, ok, bs.String())
+		require.Equal(t, expect, v, "%s-%s-%s, json=%s", group, id, name, bs.String())
+	}
+
+	testEqual("watch", t.Name(), "lines", 3)
+	testEqual("discipline", t.Name(), "tail_lines", 3)
+	testEqual("discipline", t.Name(), "match_lines", 3)
+	testEqual("discipline", t.Name(), "bad_ip", 0)
+	testEqual("discipline", t.Name(), "allow_ip", 1)
+	testEqual("discipline", t.Name(), "watch_ip", 0)
+	testEqual("discipline", t.Name(), "arrest_ip", 2)
+	testEqual("jail", t.Name(), "success", 2)
+	testEqual("jail", t.Name(), "fail", 0)
 }
 
 func TestLogDisciplineRateWorks(t *testing.T) {

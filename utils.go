@@ -537,10 +537,10 @@ func (c *Counter) Name() string {
 	return c.name
 }
 
-var counters sync.Map
+var globalCounters sync.Map
 
 func RegisterCounter(c *Counter) {
-	counters.Store(c, c)
+	globalCounters.Store(c, c)
 }
 
 func RegisterNewCounter(group, id, name string) *Counter {
@@ -553,7 +553,7 @@ func OutputCounters(w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	data := map[string]map[string]map[string]int64{}
-	counters.Range(func(k, v any) bool {
+	globalCounters.Range(func(k, v any) bool {
 		c := v.(*Counter)
 		g := data[c.group]
 		if g == nil {
