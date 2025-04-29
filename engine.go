@@ -37,10 +37,8 @@ func runJail(bad BadLog, j *Jail, logger Logger) {
 	err := j.Action.Arrest(bad, logger)
 	if err != nil {
 		logger.Errorf("[engine][discipline-%s][watch-%s][jail-%s] arrest %s[%s] by line: %s fail: %v", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.IPLocation, bad.Line, err)
-		CountArrestFail.Incr()
 	} else {
 		logger.Infof("[engine][discipline-%s][watch-%s][jail-%s] arrest success: %s[%s]", bad.DisciplineID, bad.WatchID, j.ID, ip, bad.IPLocation)
-		CountArrestSuccess.Incr()
 	}
 }
 
@@ -213,8 +211,3 @@ func Start(cfg *Config, logger Logger, test string, statListen string) (wait, st
 	}
 	return eg.Wait, eg.Stop, nil
 }
-
-var (
-	CountArrestSuccess = RegisterNewCounter("total_arrest_success")
-	CountArrestFail    = RegisterNewCounter("total_arrest_fail")
-)

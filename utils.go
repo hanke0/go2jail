@@ -511,13 +511,17 @@ func (c *Finisher) Len() int {
 }
 
 type Counter struct {
-	name string
-	n    atomic.Int64
+	group string
+	id    string
+	name  string
+	n     atomic.Int64
 }
 
-func NewCounter(name string) *Counter {
+func NewCounter(group, id, name string) *Counter {
 	return &Counter{
-		name: name,
+		group: group,
+		id:    id,
+		name:  name,
 	}
 }
 
@@ -536,11 +540,11 @@ func (c *Counter) Name() string {
 var counters sync.Map
 
 func RegisterCounter(c *Counter) {
-	counters.Store(c.Name(), c)
+	counters.Store(c, c)
 }
 
-func RegisterNewCounter(name string) *Counter {
-	c := NewCounter(name)
+func RegisterNewCounter(group, id, name string) *Counter {
+	c := NewCounter(group, id, name)
 	RegisterCounter(c)
 	return c
 }
@@ -548,10 +552,20 @@ func RegisterNewCounter(name string) *Counter {
 func OutputCounters(w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
-	data := map[string]int64{}
+	data := map[string]map[string]map[string]int64{}
 	counters.Range(func(k, v any) bool {
 		c := v.(*Counter)
-		data[c.Name()] = c.Value()
+		g := data[c.group]
+		if g == nil {
+			g = map[string]map[string]int64{}
+			data[c.group] = g
+		}
+		id := g[c.id]
+		if id == nil {
+			id = map[string]int64{}
+			g[c.id] = id
+		}
+		id[c.name] = c.Value()
 		return true
 	})
 	return enc.Encode(data)

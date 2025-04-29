@@ -28,6 +28,9 @@ type FileWatch struct {
 	cancel  Finisher
 	wg      sync.WaitGroup
 	wgCount atomic.Int32
+
+	linesCounter *Counter
+	filesCounter *Counter
 }
 
 func NewFileWatch(decode Decoder) (Watcher, error) {
@@ -41,6 +44,8 @@ func NewFileWatch(decode Decoder) (Watcher, error) {
 	var cancel func()
 	f.ctx, cancel = context.WithCancel(context.Background())
 	f.cancel.Push(cancel)
+	f.linesCounter = RegisterNewCounter("watch", f.ID, "lines")
+	f.filesCounter = RegisterNewCounter("watch", f.ID, "files")
 	return &f, nil
 }
 
@@ -97,6 +102,7 @@ func (fd *FileWatch) watch(logger Logger, testing bool) (<-chan Line, error) {
 		fd.wg.Add(1)
 		fd.wgCount.Add(1)
 		go func(t *tail.Tail, f string) {
+			fd.filesCounter.Incr()
 			defer func() {
 				fd.wg.Done()
 				// all files closed read. stop watch
@@ -126,6 +132,7 @@ func (fd *FileWatch) watch(logger Logger, testing bool) (<-chan Line, error) {
 					if err := ch.Send(l); err != nil {
 						return
 					}
+					fd.linesCounter.Incr()
 				}
 			}
 		}(t, f)
@@ -149,6 +156,9 @@ type ShellWatch struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel func()
+
+	linesCounter   *Counter
+	restartCounter *Counter
 }
 
 func NewShellWatch(decode Decoder) (Watcher, error) {
@@ -166,6 +176,8 @@ func NewShellWatch(decode Decoder) (Watcher, error) {
 	s.ShellOutput = ""
 	s.ch = NewChan[string](0)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.linesCounter = RegisterNewCounter("watch", s.ID, "lines")
+	s.restartCounter = RegisterNewCounter("watch", s.ID, "restart")
 	return &s, nil
 }
 
@@ -203,6 +215,7 @@ func (sd *ShellWatch) watch(logger Logger, test bool) (<-chan Line, error) {
 		}
 		exeErr := waitExit()
 		for sd.RestartPolicy.Next(exeErr) {
+			sd.restartCounter.Incr()
 			logger.Debugf("[watch-%s] exec restart: exiterr=%v", sd.ID, exeErr)
 			cmd, cancel, exeErr = sd.execute(logger, test)
 			if exeErr == nil {
@@ -240,6 +253,7 @@ func (sd *ShellWatch) watch(logger Logger, test bool) (<-chan Line, error) {
 					logger.Infof("[watch-%s] send line to channel fail: %v", sd.ID, err)
 					return
 				}
+				sd.linesCounter.Incr()
 			}
 		}
 	}()

@@ -56,8 +56,8 @@ func NewNftJail(decode Decoder) (Jailer, error) {
 		return nil, fmt.Errorf("can not find nft executable: %w", err)
 	}
 	j.NftExecutable = p
-	j.jailSuccessCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_success", j.ID))
-	j.jailFailCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_fail", j.ID))
+	j.jailSuccessCounter = RegisterNewCounter("jail", j.ID, "success")
+	j.jailFailCounter = RegisterNewCounter("jail", j.ID, "fail")
 	return &j, nil
 }
 
@@ -119,7 +119,7 @@ func NewEchoJail(decode Decoder) (Jailer, error) {
 	if err := decode(&j); err != nil {
 		return nil, err
 	}
-	j.jailSuccessCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_success", j.ID))
+	j.jailSuccessCounter = RegisterNewCounter("jail", j.ID, "success")
 	return &j, nil
 }
 
@@ -157,7 +157,7 @@ func NewLogJail(decode Decoder) (Jailer, error) {
 	if err != nil {
 		return nil, err
 	}
-	j.jailSuccessCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_success", j.ID))
+	j.jailSuccessCounter = RegisterNewCounter("jail", j.ID, "success")
 	return &j, nil
 }
 
@@ -169,9 +169,6 @@ func (ej *LogJail) Arrest(bad BadLog, log Logger) error {
 
 func (ej *LogJail) Close() error {
 	return nil
-}
-
-type Options struct {
 }
 
 type ShellJail struct {
@@ -191,8 +188,8 @@ func NewShellJail(decode Decoder) (Jailer, error) {
 	if err := j.YAMLScriptOption.SetupShell(); err != nil {
 		return nil, err
 	}
-	j.jailSuccessCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_success", j.ID))
-	j.jailFailCounter = RegisterNewCounter(fmt.Sprintf("%s_jail_fail", j.ID))
+	j.jailSuccessCounter = RegisterNewCounter("jail", j.ID, "success")
+	j.jailFailCounter = RegisterNewCounter("jail", j.ID, "fail")
 	return &j, nil
 }
 
@@ -218,6 +215,9 @@ func (sj *ShellJail) Close() error {
 type HTTPJail struct {
 	BaseJail   `yaml:",inline"`
 	HTTPHelper `yaml:",inline"`
+
+	jailSuccessCounter *Counter `yaml:"-"`
+	jailFailCounter    *Counter `yaml:"-"`
 }
 
 func NewHTTPJail(decode Decoder) (Jailer, error) {
@@ -228,13 +228,20 @@ func NewHTTPJail(decode Decoder) (Jailer, error) {
 	if err := j.HTTPHelper.Init("POST"); err != nil {
 		return nil, err
 	}
+	j.jailSuccessCounter = RegisterNewCounter("jail", j.ID, "success")
+	j.jailFailCounter = RegisterNewCounter("jail", j.ID, "fail")
 	return &j, nil
 }
 
 func (hj *HTTPJail) Arrest(bad BadLog, log Logger) error {
 	log.Debugf("[jail-%s] start arrest ip %s", hj.ID, bad.IP)
 	_, err := hj.HTTPHelper.Do(context.Background(), false, bad.Mapping)
-	return err
+	if err != nil {
+		hj.jailFailCounter.Incr()
+		return err
+	}
+	hj.jailSuccessCounter.Incr()
+	return nil
 }
 
 func (hj *HTTPJail) Close() error {
@@ -257,6 +264,9 @@ type MailJail struct {
 	serverName  string
 	fromAddress string
 	toAddresses []string
+
+	jailSuccessCounter *Counter `yaml:"-"`
+	jailFailCounter    *Counter `yaml:"-"`
 }
 
 func NewMailJail(decode Decoder) (Jailer, error) {
@@ -307,6 +317,8 @@ func NewMailJail(decode Decoder) (Jailer, error) {
 	default:
 		return nil, fmt.Errorf("unknown encryption method: %s", j.Encryption)
 	}
+	j.jailSuccessCounter = RegisterNewCounter("jail", j.ID, "success")
+	j.jailFailCounter = RegisterNewCounter("jail", j.ID, "fail")
 	return &j, nil
 }
 
@@ -314,7 +326,12 @@ func (mj *MailJail) Arrest(bad BadLog, log Logger) error {
 	body := os.Expand(mj.Body, bad.Mapping)
 	subject := os.Expand(mj.Subject, bad.Mapping)
 	err := mj.SendMail(log, subject, body)
-	return err
+	if err != nil {
+		mj.jailFailCounter.Incr()
+		return err
+	}
+	mj.jailSuccessCounter.Incr()
+	return nil
 }
 
 type Mailer interface {
