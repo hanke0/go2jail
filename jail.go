@@ -250,7 +250,7 @@ func (hj *HTTPJail) Close() error {
 
 type MailJail struct {
 	BaseJail     `yaml:",inline"`
-	Host         string
+	Host         string `yaml:"host"`
 	From         string `yaml:"from"`
 	To           string `yaml:"to"`
 	Subject      string `yaml:"subject"`
