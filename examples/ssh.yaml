@@ -12,15 +12,15 @@ allows:
   - 192.168.1.0/24
 
 watches:
-  - id: nginx
+  - id: ssh
     type: file
     files:
       - /var/log/auth.log
 
 disciplines:
-  - id: nginx
+  - id: ssh
     jails: ["nft"]
-    watches: ["nginx"]
+    watches: ["ssh"]
     rate: 3/60m
     matches:
       - authentication\s+failure.+?rhost=%(ip)

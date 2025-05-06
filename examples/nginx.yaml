@@ -21,7 +21,9 @@ disciplines:
   - id: nginx
     jails: ["nft"]
     watches: ["nginx"]
-    rate: 3/60m
+    rate: 10/h
     matches:
-      # $remote_addr - "$remote_user" [$time_iso8601] "$host" "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" $request_time
-      - '%(ip)\s+\-\s+"[^"]+"\s+\[[^\]]+\]\s+"[^"]+"\s+"[^"]+"\s+(?<status>401|402|403)\s+'
+      # log_format combined '$remote_addr - $remote_user [$time_local] '
+      #          '"$request" $status $body_bytes_sent '
+      #          '"$http_referer" "$http_user_agent"';
+      - '%(ip)\s+\-\s+[^\s]+\s+\[[^\]]+\]\s+"[^"]+"\s+(?<status>4[0-9]{2})\s+'
