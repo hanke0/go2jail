@@ -98,10 +98,7 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	scriptTempDirectory = filepath.Join(os.TempDir(), fmt.Sprintf("%s(%s)", u.Uid, u.Username))
-	if strings.HasPrefix(scriptTempDirectory, "-") {
-		panic(fmt.Sprintf("invalid scriptTempDirectory: %s", scriptTempDirectory))
-	}
+	scriptTempDirectory = filepath.Join(os.TempDir(), "go2jail", fmt.Sprintf("%s(%s)", u.Uid, u.Username))
 	err = os.MkdirAll(scriptTempDirectory, 0755)
 	if err != nil {
 		panic(err)

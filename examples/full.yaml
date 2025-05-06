@@ -99,7 +99,7 @@ watches:
     #run_group: root # Group to run the script as (default: current group)
     restart_policy: on-success # always,on-success,once.
     run: |
-      tail -F /var/log/auth.log
+      journalctl -n 0 -f -t sshd
 
 # Security Discipline Configuration
 # Define attack patterns and response rules for monitored services
